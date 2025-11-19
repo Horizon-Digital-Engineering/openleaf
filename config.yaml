@@ -1,0 +1,20 @@
+transport:
+  type: "synthetic"
+  update_interval_sec: 0.5
+
+logging:
+  enabled: false
+  path: "./leaf.log"
+
+vehicle:
+  year: 2013
+  generation: "ZE0"
+  model: "SV"
+  pack_kwh: 24.0
+  cell_count: 96
+  # Typical combinations:
+  #   2011-2015 (ZE0) 24 kWh packs -> cell_count: 96
+  #   2016-2017 (ZE0 refresh) 30 kWh -> cell_count: 96
+  #   2018-2021 (ZE1) 40 kWh -> cell_count: 96
+  #   2019-2024 (ZE1 e+) 62 kWh -> cell_count: 96
+  # Future ZE2 packs TBD; update pack_kwh/cell_count accordingly.

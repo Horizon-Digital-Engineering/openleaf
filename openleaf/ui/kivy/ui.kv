@@ -1,0 +1,223 @@
+#:import dp kivy.metrics.dp
+#:import Gauge openleaf.ui.kivy.widgets.gauge.Gauge
+#:import Metric openleaf.ui.kivy.widgets.metric.Metric
+#:import CellGraph openleaf.ui.kivy.widgets.cell_graph.CellGraph
+
+<Metric>:
+    size_hint_y: None
+    height: dp(160)
+    size_hint_x: 1
+    padding: dp(12)
+    spacing: dp(8)
+    canvas.before:
+        Color:
+            rgba: (0.15, 0.15, 0.18, 1)
+        RoundedRectangle:
+            radius: [dp(12)]
+            pos: self.pos
+            size: self.size
+    Label:
+        text: root.label
+        color: (0.8, 0.8, 0.85, 1)
+        font_size: '28sp'
+        halign: 'left'
+        valign: 'middle'
+        text_size: self.size
+    Label:
+        text: f"{root.value} {root.unit}"
+        color: (1, 1, 1, 1)
+        font_size: '42sp'
+        halign: 'center'
+        valign: 'middle'
+        text_size: self.size
+
+<Gauge>:
+    size_hint: (1, 1)
+    canvas.before:
+        Color:
+            rgba: (0, 0, 0, 0)
+        Rectangle:
+            size: self.size
+            pos: self.pos
+    FloatLayout:
+        Label:
+            text: root.label
+            color: (0.7, 0.9, 1, 1)
+            font_size: '28sp'
+            size_hint: None, None
+            width: root.width
+            height: dp(40)
+            center_x: root.center_x
+            center_y: root.center_y + dp(70)
+            halign: 'center'
+            valign: 'middle'
+            text_size: self.size
+        Label:
+            text: f"{root.value:.1f}%"
+            font_size: '48sp'
+            color: (1, 1, 1, 1)
+            size_hint: None, None
+            width: root.width
+            height: dp(80)
+            center_x: root.center_x
+            center_y: root.center_y
+            halign: 'center'
+            valign: 'middle'
+            text_size: self.size
+
+<Dashboard>:
+    orientation: 'vertical'
+    padding: dp(30)
+    spacing: dp(25)
+    canvas.before:
+        Color:
+            rgba: (0.07, 0.07, 0.08, 1)
+        Rectangle:
+            pos: self.pos
+            size: self.size
+    BoxLayout:
+        size_hint_y: 0.45
+        spacing: dp(20)
+        Gauge:
+            id: soc_gauge
+            label: 'SOC'
+            color_rgba: (0.2, 0.9, 0.4, 1)
+        Gauge:
+            id: soh_gauge
+            label: 'SOH'
+            color_rgba: (0.2, 0.6, 1, 1)
+    BoxLayout:
+        size_hint_y: 0.35
+        spacing: dp(20)
+        Metric:
+            id: voltage
+            label: 'Pack Voltage'
+            unit: 'V'
+        Metric:
+            id: temp
+            label: 'Pack Temp'
+            unit: '\u00b0C'
+        Metric:
+            id: delta
+            label: 'Cell \u0394'
+            unit: 'mV'
+    Label:
+        id: toast
+        text: ''
+        color: (1, 1, 1, 1)
+        font_size: '28sp'
+        size_hint_y: None
+        height: dp(40)
+        size_hint_x: None
+        width: self.texture_size[0] + dp(60)
+        opacity: 0
+        text_size: (self.width - dp(20), None)
+        halign: 'center'
+        valign: 'middle'
+        canvas.before:
+            Color:
+                rgba: (0, 0, 0, self.opacity * 0.8)
+            RoundedRectangle:
+                radius: [dp(10)]
+                pos: self.x - dp(20), self.y
+                size: self.width, dp(50)
+        pos_hint: {'center_x': 0.5}
+
+<CellsView@BoxLayout>:
+    orientation: 'vertical'
+    padding: dp(30)
+    spacing: dp(20)
+    BoxLayout:
+        size_hint_y: None
+        height: dp(160)
+        spacing: dp(20)
+        Metric:
+            id: cells_max
+            label: 'Max Volt'
+            unit: 'V'
+        Metric:
+            id: cells_min
+            label: 'Min Volt'
+            unit: 'V'
+        Metric:
+            id: cells_delta
+            label: 'Delta'
+            unit: 'mV'
+    CellGraph:
+        id: cell_graph
+
+<DtcView@BoxLayout>:
+    orientation: 'vertical'
+    padding: dp(30)
+    spacing: dp(20)
+    BoxLayout:
+        size_hint_y: None
+        height: dp(80)
+        spacing: dp(20)
+        Button:
+            text: 'Pull DTCs'
+            font_size: '26sp'
+            on_release: app.pull_dtcs()
+        Button:
+            text: 'Clear DTCs'
+            font_size: '26sp'
+            on_release: app.on_clear_dtcs()
+    Label:
+        id: dtc_empty
+        text: 'No active DTCs'
+        color: (0.8, 0.8, 0.85, 0.7)
+        font_size: '28sp'
+        size_hint_y: None
+        height: dp(40)
+        opacity: 0
+    ScrollView:
+        size_hint: 1, 1
+        bar_width: dp(8)
+        canvas.before:
+            Color:
+                rgba: (0.1, 0.1, 0.12, 1)
+            Rectangle:
+                pos: self.pos
+                size: self.size
+        GridLayout:
+            id: dtc_container
+            cols: 1
+            spacing: dp(8)
+            size_hint_y: None
+            height: self.minimum_height
+
+<RootLayout@BoxLayout>:
+    orientation: 'vertical'
+    canvas.before:
+        Color:
+            rgba: (0.05, 0.05, 0.06, 1)
+        Rectangle:
+            pos: self.pos
+            size: self.size
+    ScreenManager:
+        id: screen_manager
+        Screen:
+            name: 'dashboard'
+            Dashboard:
+                id: dashboard
+        Screen:
+            name: 'cells'
+            CellsView:
+                id: cells_view
+        Screen:
+            name: 'dtcs'
+            DtcView:
+                id: dtc_view
+    BoxLayout:
+        size_hint_y: None
+        height: dp(60)
+        padding: dp(20)
+        spacing: dp(20)
+        Button:
+            text: '<'
+            font_size: '26sp'
+            on_release: app.prev_screen()
+        Button:
+            text: '>'
+            font_size: '26sp'
+            on_release: app.next_screen()

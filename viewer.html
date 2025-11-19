@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>OpenLeaf Viewer</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 2rem;
+        background: #111;
+        color: #eee;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1rem;
+      }
+      .card {
+        border: 1px solid #444;
+        border-radius: 0.5rem;
+        padding: 1rem;
+        background: #1c1c1c;
+      }
+      button {
+        padding: 0.5rem 1rem;
+        border: none;
+        border-radius: 0.25rem;
+        cursor: pointer;
+        background: #28a745;
+        color: #fff;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>OpenLeaf Live State</h1>
+    <div class="grid" id="stateGrid"></div>
+    <div style="margin-top: 2rem">
+      <button id="clearBtn">Clear DTCs</button>
+    </div>
+
+    <script>
+      async function fetchState() {
+        try {
+          const res = await fetch('/state');
+          const data = await res.json();
+          const grid = document.getElementById('stateGrid');
+          grid.innerHTML = '';
+          Object.entries(data).forEach(([key, value]) => {
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.innerHTML = `<h3>${key}</h3><p>${value}</p>`;
+            grid.appendChild(card);
+          });
+        } catch (err) {
+          console.error('Failed to fetch state', err);
+        }
+      }
+
+      async function clearDtcs() {
+        try {
+          const res = await fetch('/command/clear_dtcs', { method: 'POST' });
+          const data = await res.json();
+          alert(`Command status: ${data.status}`);
+        } catch (err) {
+          alert('Failed to send command');
+        }
+      }
+
+      document.getElementById('clearBtn').addEventListener('click', clearDtcs);
+      setInterval(fetchState, 500);
+      fetchState();
+    </script>
+  </body>
+</html>
