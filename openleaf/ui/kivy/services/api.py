@@ -38,14 +38,18 @@ class ApiClient:
     ) -> None:
         """Repeatedly fetch state and invoke callback."""
 
-        while True:
-            try:
-                state = await self.get_state()
-                if callback:
-                    result = callback(state)
-                    if asyncio.iscoroutine(result):
-                        await result
-            except httpx.HTTPError:
-                # Swallow errors for now; UI can show stale data
-                pass
-            await asyncio.sleep(interval)
+        try:
+            while True:
+                try:
+                    state = await self.get_state()
+                    if callback:
+                        result = callback(state)
+                        if asyncio.iscoroutine(result):
+                            await result
+                except httpx.HTTPError:
+                    # Swallow errors for now; UI can show stale data
+                    pass
+                await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            # Clean cancellation - this is expected on shutdown
+            pass

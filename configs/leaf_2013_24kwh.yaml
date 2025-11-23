@@ -1,5 +1,6 @@
 transport:
-  type: "ble"
+  type: "obd2"
+  connection_type: "ble"
   ble_address: "9F94D6BB-D772-0557-976D-6DA82685018D"
   ble_service_uuid: "0000ffe0-0000-1000-8000-00805f9b34fb"
   ble_write_char_uuid: "0000ffe1-0000-1000-8000-00805f9b34fb"

@@ -1,0 +1,29 @@
+# Example config for USB or Bluetooth Classic ELM327 adapters
+transport:
+  type: "obd2"
+  connection_type: "serial"  # or "bluetooth" for rfcomm
+
+  # Serial/USB settings
+  serial_port: "/dev/ttyUSB0"  # Linux USB
+  # serial_port: "/dev/rfcomm0"  # Linux Bluetooth Classic
+  # serial_port: "COM3"  # Windows USB
+  serial_baudrate: 115200
+
+  # Protocol settings
+  timeout_sec: 1.0
+  update_interval_sec: 0.5
+  pid_path: "pids/leaf.yaml"
+  reconnect_delay_sec: 5.0
+  enable_flow_control: false
+
+logging:
+  enabled: true
+  path: "./logs"
+  level: "INFO"
+
+vehicle:
+  year: 2013
+  generation: "ZE0"
+  model: "SV"
+  pack_kwh: 24.0
+  cell_count: 96

@@ -182,6 +182,21 @@ class OpenLeafApp(App):
     def prev_screen(self) -> None:
         self._shift_screen(-1)
 
+    def on_stop(self) -> None:
+        """Clean shutdown of async tasks."""
+        # Cancel the polling task
+        if self._polling_future:
+            self._polling_future.cancel()
+
+        # Close the API client
+        asyncio.run_coroutine_threadsafe(
+            self.api_client.close(),
+            self._loop
+        ).result(timeout=2.0)
+
+        # Stop the event loop
+        self._loop.call_soon_threadsafe(self._loop.stop)
+
     def _update_debug_view(self, screen_manager, log: list[Dict[str, Any]]) -> None:
         if self._last_debug_log is not None and log == self._last_debug_log:
             return

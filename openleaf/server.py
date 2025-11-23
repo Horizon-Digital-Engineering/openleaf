@@ -11,10 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import AppConfig
 from .state import StateStore
-from .transports.base import Transport
-from .transports.ble import BleOBDTransport
-from .transports.obd import OBDTransport
-from .transports.synthetic import SyntheticTransport
+from .transports import OBD2Transport, PlaybackTransport, SyntheticTransport, Transport
 from .logging.setup import get_transport_logger
 
 
@@ -76,44 +73,66 @@ class LeafStateServer:
     def _create_transport(self) -> Transport:
         transport_type = self.config.transport.type
         transport_logger = None
+
+        # Setup logger if enabled
         if self.config.logging.enabled:
-            identifier = "transport"
-            if transport_type == "obd":
-                identifier = f"obd_{self.config.transport.serial_port}"
-            elif transport_type == "ble":
-                identifier = f"ble_{self.config.transport.ble_address or self.config.transport.serial_port}"
+            identifier = f"{transport_type}_transport"
+            if transport_type == "obd2":
+                conn_type = getattr(self.config.transport, "connection_type", "ble")
+                if conn_type == "ble":
+                    identifier = f"obd2_ble_{getattr(self.config.transport, 'ble_address', 'unknown')}"
+                else:
+                    identifier = f"obd2_serial_{getattr(self.config.transport, 'serial_port', 'unknown')}"
             transport_logger = get_transport_logger(identifier, self.config.logging)
 
+        # Create transport based on type
         if transport_type == "synthetic":
             return SyntheticTransport(
                 update_interval_sec=self.config.transport.update_interval_sec,
                 cell_count=self.config.vehicle.cell_count,
             )
-        if transport_type == "obd":
-            return OBDTransport(
-                port=self.config.transport.serial_port,
-                baudrate=self.config.transport.baudrate,
+
+        elif transport_type == "obd2":
+            # Unified OBD2 transport with pluggable connections
+            connection_type = getattr(self.config.transport, "connection_type", "ble")
+
+            return OBD2Transport(
+                connection_type=connection_type,
+                # BLE settings
+                ble_address=getattr(self.config.transport, "ble_address", None),
+                ble_service_uuid=getattr(self.config.transport, "ble_service_uuid",
+                                         "0000ffe0-0000-1000-8000-00805f9b34fb"),
+                ble_write_char_uuid=getattr(self.config.transport, "ble_write_char_uuid",
+                                           "0000ffe1-0000-1000-8000-00805f9b34fb"),
+                ble_notify_char_uuid=getattr(self.config.transport, "ble_notify_char_uuid",
+                                            "0000ffe1-0000-1000-8000-00805f9b34fb"),
+                # Serial settings
+                serial_port=getattr(self.config.transport, "serial_port", None),
+                serial_baudrate=getattr(self.config.transport, "serial_baudrate", 115200),
+                # Common settings
                 timeout_sec=self.config.transport.timeout_sec,
                 update_interval_sec=self.config.transport.update_interval_sec,
                 pid_path=self.config.transport.pid_path,
                 reconnect_delay_sec=self.config.transport.reconnect_delay_sec,
-                enable_flow_control=self.config.transport.enable_flow_control,
+                enable_flow_control=getattr(self.config.transport, "enable_flow_control", False),
+                # Recording
+                record_enabled=getattr(self.config.transport, "record_enabled", False),
+                record_path=getattr(self.config.transport, "record_path", None),
+                # Logging
                 connection_logger=transport_logger,
             )
-        if transport_type == "ble":
-            return BleOBDTransport(
-                address=self.config.transport.ble_address or self.config.transport.serial_port,
-                service_uuid=self.config.transport.ble_service_uuid,
-                write_char_uuid=self.config.transport.ble_write_char_uuid,
-                notify_char_uuid=self.config.transport.ble_notify_char_uuid,
-                timeout_sec=self.config.transport.timeout_sec,
+
+        elif transport_type == "playback":
+            return PlaybackTransport(
+                file_path=self.config.transport.playback_file,
+                format=getattr(self.config.transport, "playback_format", "auto"),
+                loop_playback=getattr(self.config.transport, "loop_playback", True),
+                playback_speed=getattr(self.config.transport, "playback_speed", 1.0),
                 update_interval_sec=self.config.transport.update_interval_sec,
-                pid_path=self.config.transport.pid_path,
-                reconnect_delay_sec=self.config.transport.reconnect_delay_sec,
-                enable_flow_control=self.config.transport.enable_flow_control,
-                connection_logger=transport_logger,
             )
-        raise NotImplementedError(f"Transport '{transport_type}' is not implemented yet")
+
+        else:
+            raise NotImplementedError(f"Transport '{transport_type}' is not implemented")
 
     def start_background_loop(self) -> None:
         if self._thread and self._thread.is_alive():

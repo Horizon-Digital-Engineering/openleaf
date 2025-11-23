@@ -1,16 +1,50 @@
+# OpenLeaf Configuration
+# ======================
+# Transport types: synthetic, obd2, playback
+
 transport:
-  type: "synthetic"
+  # Choose transport type: synthetic, obd2, or playback
+  type: "obd2"
+
+  # Common settings
   update_interval_sec: 0.5
-  # Set to "obd" to use an ELM327 Bluetooth adapter. Typical defaults for Raspberry Pi:
-  # serial_port: "/dev/rfcomm0"
-  # baudrate: 115200
-  # timeout_sec: 1.0
-  # pid_path: "pids/leaf.yaml"
+
+  # OBD2 Transport Settings
+  # -----------------------
+  # Connection type: ble, serial, or bluetooth (classic)
+  connection_type: "ble"
+
+  # BLE Connection (for BLE ELM327 adapters like LELink2, Vgate iCar)
+  ble_address: "AA:BB:CC:DD:EE:FF"  # Replace with your adapter's MAC
+  ble_service_uuid: "0000ffe0-0000-1000-8000-00805f9b34fb"
+  ble_write_char_uuid: "0000ffe1-0000-1000-8000-00805f9b34fb"
+  ble_notify_char_uuid: "0000ffe1-0000-1000-8000-00805f9b34fb"
+
+  # Serial Connection (for USB or Bluetooth Classic adapters)
+  serial_port: "/dev/rfcomm0"  # Linux/Mac: /dev/ttyUSB0, Windows: COM3
+  serial_baudrate: 115200
+
+  # OBD2 Protocol Settings
+  timeout_sec: 1.0
+  pid_path: "pids/leaf.yaml"
+  reconnect_delay_sec: 5.0
+  enable_flow_control: false
+
+  # Recording (when using OBD2)
+  record_enabled: false
+  record_path: "logs/recording_{timestamp}.json"
+
+  # Playback Transport Settings (when type: "playback")
+  # ----------------------------------------------------
+  playback_file: "logs/sample_drive.json"
+  playback_format: "auto"  # auto, json, leafspy, can
+  loop_playback: true
+  playback_speed: 1.0
 
 logging:
   enabled: true
   path: "./logs"
-  level: "DEBUG"
+  level: "INFO"
 
 vehicle:
   year: 2013
@@ -18,9 +52,8 @@ vehicle:
   model: "SV"
   pack_kwh: 24.0
   cell_count: 96
-  # Typical combinations:
-  #   2011-2015 (ZE0) 24 kWh packs -> cell_count: 96
-  #   2016-2017 (ZE0 refresh) 30 kWh -> cell_count: 96
-  #   2018-2021 (ZE1) 40 kWh -> cell_count: 96
-  #   2019-2024 (ZE1 e+) 62 kWh -> cell_count: 96
-  # Future ZE2 packs TBD; update pack_kwh/cell_count accordingly.
+  # Common configurations:
+  # 2011-2015 (ZE0): 24 kWh, 96 cells
+  # 2016-2017 (ZE0): 30 kWh, 96 cells
+  # 2018-2021 (ZE1): 40 kWh, 96 cells
+  # 2019-2024 (ZE1): 62 kWh, 96 cells

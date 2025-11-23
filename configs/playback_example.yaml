@@ -1,0 +1,20 @@
+# Example config for replaying recorded sessions
+transport:
+  type: "playback"
+
+  # Playback settings
+  playback_file: "logs/sample_drive.json"
+  playback_format: "auto"  # auto-detect format (json, leafspy, can)
+  loop_playback: true  # Loop when reaching end of file
+  playback_speed: 2.0  # 2x speed playback
+  update_interval_sec: 0.5
+
+logging:
+  enabled: false
+
+vehicle:
+  year: 2018
+  generation: "ZE1"
+  model: "SV"
+  pack_kwh: 40.0
+  cell_count: 96
