@@ -1,0 +1,41 @@
+leaf_pids:
+  - name: "Battery Status Frame"
+    request_id: 0x79B
+    response_id: 0x7BB
+    service: 0x21
+    data_identifier: 0x01
+    poll_interval_sec: 0.5
+    signals:
+      - key: "soc_true"
+        start_bit: 0
+        length: 16
+        scale: 0.1
+        unit: "%"
+      - key: "pack_voltage"
+        start_bit: 16
+        length: 16
+        scale: 0.01
+        unit: "V"
+      - key: "pack_temp_c"
+        start_bit: 32
+        length: 8
+        scale: 1.0
+        offset: -40.0
+        unit: "C"
+      - key: "cell_delta_mv"
+        start_bit: 40
+        length: 8
+        scale: 1.0
+        unit: "mV"
+  - name: "Battery SOH"
+    request_id: 0x79B
+    response_id: 0x7BB
+    service: 0x21
+    data_identifier: 0x61
+    poll_interval_sec: 10.0
+    signals:
+      - key: "soh"
+        start_bit: 0
+        length: 16
+        scale: 0.1
+        unit: "%"

@@ -57,7 +57,7 @@ def test_load_config_full_override(tmp_path) -> None:
     config = load_config(str(cfg_path))
     assert isinstance(config, AppConfig)
     assert config.transport == TransportConfig(type="can", update_interval_sec=0.2)
-    assert config.logging == LoggingConfig(enabled=True, path="/tmp/leaf.log")
+    assert config.logging == LoggingConfig(enabled=True, path="/tmp/leaf.log", level="INFO")
     assert config.vehicle == VehicleConfig(
         year=2020, generation="ZE1", model="SL Plus", pack_kwh=62.0, cell_count=96
     )

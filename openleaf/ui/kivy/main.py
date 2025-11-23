@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import sys
 import threading
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from kivy.app import App
 from kivy.clock import Clock
@@ -41,8 +42,9 @@ class OpenLeafApp(App):
         self._loop = asyncio.new_event_loop()
         self._loop_thread = threading.Thread(target=self._run_loop, daemon=True)
         self._polling_future: asyncio.Future[Any] | None = None
-        self._screen_order = ["dashboard", "cells", "dtcs"]
+        self._screen_order = ["dashboard", "cells", "dtcs", "debug"]
         self._last_dtcs: list[str] = []
+        self._last_debug_log: Optional[list[Dict[str, Any]]] = None
 
     def build(self) -> BoxLayout:
         Builder.load_file(str(KV_FILE))
@@ -92,6 +94,8 @@ class OpenLeafApp(App):
 
         dtcs = state.get("dtcs") or []
         self._update_dtc_view(screen_manager, dtcs)
+        debug_log = state.get("_debug_log") or []
+        self._update_debug_view(screen_manager, debug_log)
 
     def _update_dtc_view(self, screen_manager, dtcs: list[str]) -> None:
         if dtcs == self._last_dtcs:
@@ -177,6 +181,40 @@ class OpenLeafApp(App):
 
     def prev_screen(self) -> None:
         self._shift_screen(-1)
+
+    def _update_debug_view(self, screen_manager, log: list[Dict[str, Any]]) -> None:
+        if self._last_debug_log is not None and log == self._last_debug_log:
+            return
+        self._last_debug_log = list(log)
+        try:
+            debug_screen = screen_manager.get_screen("debug")
+        except Exception:
+            return
+        debug_view = debug_screen.children[0]
+        debug_ids = debug_view.ids
+        container = debug_ids.debug_container
+        container.clear_widgets()
+        debug_ids.debug_empty.opacity = 1 if not log else 0
+        if not log:
+            return
+        for entry in reversed(log):
+            ts = entry.get("ts", 0.0)
+            direction = str(entry.get("direction", "")).upper()
+            data = entry.get("data", "")
+            ts_str = datetime.fromtimestamp(ts).strftime("%H:%M:%S")
+            line = f"[{ts_str}] {direction}: {data}"
+            button = Button(
+                text=line,
+                size_hint_y=None,
+                height=dp(44),
+                font_size="18sp",
+                background_normal="",
+                background_color=(0.12, 0.16, 0.2, 1),
+                halign="left",
+                valign="middle",
+                text_size=(self.root.width - dp(60) if self.root else 0, dp(44)),
+            )
+            container.add_widget(button)
 
 
 def main() -> None:

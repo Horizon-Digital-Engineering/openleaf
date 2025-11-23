@@ -1,10 +1,16 @@
 transport:
   type: "synthetic"
   update_interval_sec: 0.5
+  # Set to "obd" to use an ELM327 Bluetooth adapter. Typical defaults for Raspberry Pi:
+  # serial_port: "/dev/rfcomm0"
+  # baudrate: 115200
+  # timeout_sec: 1.0
+  # pid_path: "pids/leaf.yaml"
 
 logging:
-  enabled: false
-  path: "./leaf.log"
+  enabled: true
+  path: "./logs"
+  level: "DEBUG"
 
 vehicle:
   year: 2013

@@ -4,11 +4,12 @@ set -euo pipefail
 VENV_DIR=".venv"
 SERVER_PID_FILE=".openleaf_server.pid"
 UI_PID_FILE=".openleaf_ui.pid"
-SERVER_LOG="openleaf_server.log"
-UI_LOG="openleaf_ui.log"
+LOG_DIR="logs"
+SERVER_LOG="${LOG_DIR}/server.log"
+UI_LOG="${LOG_DIR}/ui.log"
 
 usage() {
-  echo "Usage: $0 [server|ui|all]" >&2
+  echo "Usage: $0 [server|ui|all] [config_path]" >&2
 }
 
 ensure_venv() {
@@ -17,6 +18,9 @@ ensure_venv() {
   fi
   # shellcheck disable=SC1090
   source "${VENV_DIR}/bin/activate"
+  mkdir -p "${LOG_DIR}"
+  export KIVY_LOG_DIR="${LOG_DIR}"
+  export KIVY_LOG_NAME="kivy_ui.log"
 }
 
 install_server_deps() {
@@ -34,7 +38,7 @@ start_server() {
   fi
   ensure_venv
   install_server_deps
-  nohup python main.py >"${SERVER_LOG}" 2>&1 &
+  nohup python main.py "${CONFIG_PATH}" >"${SERVER_LOG}" 2>&1 &
   local pid=$!
   echo "${pid}" >"${SERVER_PID_FILE}"
   echo "OpenLeaf server started (PID ${pid}). Logs: ${SERVER_LOG}"
@@ -54,6 +58,7 @@ start_ui() {
 }
 
 TARGET=${1:-server}
+CONFIG_PATH=${2:-${OPENLEAF_CONFIG:-config.yaml}}
 case "${TARGET}" in
   server)
     start_server

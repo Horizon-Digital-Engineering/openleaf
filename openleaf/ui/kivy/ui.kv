@@ -186,6 +186,44 @@
             size_hint_y: None
             height: self.minimum_height
 
+<DebugView@BoxLayout>:
+    orientation: 'vertical'
+    padding: dp(30)
+    spacing: dp(16)
+    BoxLayout:
+        size_hint_y: None
+        height: dp(50)
+        Label:
+            text: 'Transport Debug (recent TX/RX)'
+            font_size: '26sp'
+            color: (0.85, 0.9, 1, 1)
+            halign: 'left'
+            valign: 'middle'
+            text_size: self.size
+    Label:
+        id: debug_empty
+        text: 'No debug data yet'
+        color: (0.8, 0.8, 0.85, 0.7)
+        font_size: '22sp'
+        size_hint_y: None
+        height: dp(30)
+        opacity: 0
+    ScrollView:
+        size_hint: 1, 1
+        bar_width: dp(8)
+        canvas.before:
+            Color:
+                rgba: (0.08, 0.09, 0.12, 1)
+            Rectangle:
+                pos: self.pos
+                size: self.size
+        GridLayout:
+            id: debug_container
+            cols: 1
+            spacing: dp(6)
+            size_hint_y: None
+            height: self.minimum_height
+
 <RootLayout@BoxLayout>:
     orientation: 'vertical'
     canvas.before:
@@ -208,6 +246,10 @@
             name: 'dtcs'
             DtcView:
                 id: dtc_view
+        Screen:
+            name: 'debug'
+            DebugView:
+                id: debug_view
     BoxLayout:
         size_hint_y: None
         height: dp(60)

@@ -49,7 +49,8 @@ The UI targets 1024x600 touch displays and shows SOC/SOH gauges plus pack metric
 0.5s. A second screen (use the arrow buttons along the bottom) renders a LeafSpy-style cell graph
 using the configured `cell_count`, and a third screen provides a DTC viewer with placeholder “pull”
 and “clear” actions. Clear commands already hit the FastAPI endpoint; full DTC retrieval will land
-once we implement it in the backend.
+once we implement it in the backend. A fourth “Debug” screen lists recent OBD transport TX/RX lines
+so you can verify ELM327 chatter from the UI.
 
 ## Configuration
 
@@ -81,6 +82,60 @@ The `vehicle` block lets you describe the battery pack you’re targeting. `cell
 synthetic transport (and future UIs) so graphs like the per-cell view know how many modules to
 render. Later transports (OBD, CAN, playback) will honor these settings to parse the correct
 signals for each Leaf generation.
+
+Preset configs live in `configs/`:
+
+- `configs/synthetic.yaml` — default synthetic mode.
+- `configs/leaf_2013_24kwh.yaml` — OBD for a 2013 ZE0 (24 kWh, 96 cells).
+- `configs/leaf_2018_40kwh.yaml` — OBD for a 2018 ZE1 (40 kWh, 96 cells).
+
+Point the server at any config via CLI or env:
+
+```bash
+python main.py configs/leaf_2013_24kwh.yaml
+bash start.sh server configs/leaf_2013_24kwh.yaml
+OPENLEAF_CONFIG=configs/leaf_2018_40kwh.yaml python main.py
+```
+
+## Logging / Debug
+
+Set `logging.enabled: true` in your config (defaults to `./logs`) to emit:
+
+- `logs/server.log` for app/server events
+- `logs/connection.log` for all transport TX/RX plus per-adapter files (`logs/connection_<adapter>.log`)
+- `logs/ui.log` (stdout/err) and `logs/kivy_ui_*.txt` when using the helper scripts (UI logging)
+
+Adjust `logging.level` for verbosity (e.g., `DEBUG` for maximum detail).
+
+## Bluetooth OBD/ELM327 Mode
+
+1. Pair your ELM327 adapter over Bluetooth on the target device (e.g., Raspberry Pi) and note
+   the rfcomm device path (commonly `/dev/rfcomm0`).
+2. Update `config.yaml`:
+
+```yaml
+transport:
+  type: "obd"
+  serial_port: "/dev/rfcomm0"
+  baudrate: 115200
+  timeout_sec: 1.0
+  pid_path: "pids/leaf.yaml"
+  update_interval_sec: 0.5
+```
+
+3. Start the server (`python main.py`). The OBD transport will:
+   - Open the serial port and run an ELM327 handshake (`ATZ`, `ATI`, `ATL1`, `ATH1`, `ATS1`,
+     `ATAL`, `ATSP6`).
+   - For each PID defined in `pids/leaf.yaml`, set the CAN header (`ATSH`), send the request
+     (for example `02 21 01`), assemble multi-frame ISO-TP replies, and decode signals into the
+     shared state store.
+   - If the adapter or vehicle drops, the loop will close the port, sleep briefly, and re-run
+     the initialization sequence on reconnect.
+
+PID definitions live in `pids/leaf.yaml` so you can tweak or add signals without code changes.
+Each entry declares the request/response IDs, service/data identifier, and per-signal bit
+positions plus scaling/offset. The defaults mirror LeafSpy-style requests to the BMS (`21 01`
+for pack metrics and `21 61` for SOH).
 
 ## Architecture
 

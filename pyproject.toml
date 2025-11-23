@@ -15,7 +15,9 @@ requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.110",
   "uvicorn[standard]>=0.29",
-  "pyyaml>=6.0.1"
+  "pyyaml>=6.0.1",
+  "pyserial>=3.5",
+  "bleak>=0.22"
 ]
 
 [project.optional-dependencies]

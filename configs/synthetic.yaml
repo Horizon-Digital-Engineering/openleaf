@@ -1,0 +1,14 @@
+transport:
+  type: "synthetic"
+  update_interval_sec: 0.5
+
+logging:
+  enabled: false
+  path: "./leaf.log"
+
+vehicle:
+  year: 2013
+  generation: "ZE0"
+  model: "SV"
+  pack_kwh: 24.0
+  cell_count: 96

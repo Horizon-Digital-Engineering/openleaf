@@ -17,3 +17,8 @@ class Transport(ABC):
         """Optional command hook; defaults to a no-op."""
 
         return None
+
+    def debug_log(self) -> list[Dict[str, Any]]:
+        """Optional debugging trace; transports can override."""
+
+        return []

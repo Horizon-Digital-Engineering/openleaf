@@ -1,0 +1,22 @@
+transport:
+  type: "ble"
+  ble_address: "163ED00E-F679-EA3A-E2EC-D7701D8FEF0B"
+  ble_service_uuid: "0000ffe0-0000-1000-8000-00805f9b34fb"
+  ble_write_char_uuid: "0000ffe1-0000-1000-8000-00805f9b34fb"
+  ble_notify_char_uuid: "0000ffe1-0000-1000-8000-00805f9b34fb"
+  timeout_sec: 1.0
+  update_interval_sec: 1.0
+  pid_path: "pids/leaf.yaml"
+  reconnect_delay_sec: 5.0
+
+logging:
+  enabled: true
+  path: "./logs"
+  level: "DEBUG"
+
+vehicle:
+  year: 2018
+  generation: "ZE1"
+  model: "SV"
+  pack_kwh: 40.0
+  cell_count: 96

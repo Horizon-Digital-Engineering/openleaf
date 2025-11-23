@@ -21,8 +21,18 @@ __all__ = [
 class TransportConfig:
     """Transport-related configuration."""
 
-    type: Literal["synthetic", "obd", "can", "playback"] = "synthetic"
+    type: Literal["synthetic", "obd", "ble", "can", "playback"] = "synthetic"
     update_interval_sec: float = 0.5
+    serial_port: str = "/dev/rfcomm0"
+    baudrate: int = 115200
+    timeout_sec: float = 1.0
+    pid_path: str = "pids/leaf.yaml"
+    reconnect_delay_sec: float = 5.0
+    enable_flow_control: bool = True
+    ble_address: str = ""
+    ble_service_uuid: str = "0000ffe0-0000-1000-8000-00805f9b34fb"
+    ble_write_char_uuid: str = "0000ffe1-0000-1000-8000-00805f9b34fb"
+    ble_notify_char_uuid: str = "0000ffe1-0000-1000-8000-00805f9b34fb"
 
 
 @dataclass(slots=True)
@@ -30,7 +40,8 @@ class LoggingConfig:
     """Logging configuration placeholders for future recorder support."""
 
     enabled: bool = False
-    path: str = "./leaf.log"
+    path: str = "./logs"
+    level: str = "INFO"
 
 
 @dataclass(slots=True)
