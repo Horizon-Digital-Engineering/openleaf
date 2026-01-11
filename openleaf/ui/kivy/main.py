@@ -71,11 +71,25 @@ class OpenLeafApp(App):
         dashboard_screen = screen_manager.get_screen("dashboard")
         dashboard_widget = dashboard_screen.children[0]
         dash_ids = dashboard_widget.ids
-        dash_ids.soc_gauge.value = state.get("soc_true", 0.0)
-        dash_ids.soh_gauge.value = state.get("soh", 0.0)
+        # SOC: prefer soc_precise > soc_display > soc_true
+        soc = state.get("soc_precise") or state.get("soc_display") or state.get("soc_true", 0.0)
+        dash_ids.soc_gauge.value = soc
+
+        # SOH: prefer soh > soh_alt (both from broadcast)
+        soh = state.get("soh") or state.get("soh_alt", 0.0)
+        dash_ids.soh_gauge.value = soh
+
         dash_ids.voltage.value = f"{state.get('pack_voltage', 0.0):.1f}"
         dash_ids.temp.value = f"{state.get('pack_temp_c', 0.0):.1f}"
         dash_ids.delta.value = f"{state.get('cell_delta_mv', 0.0):.1f}"
+
+        # Update additional fields if widgets exist
+        if hasattr(dash_ids, 'gids'):
+            dash_ids.gids.value = f"{state.get('gids', 0):.0f}"
+        if hasattr(dash_ids, 'hx'):
+            dash_ids.hx.value = f"{state.get('battery_hx', 0.0):.1f}"
+        if hasattr(dash_ids, 'range_val'):
+            dash_ids.range_val.value = f"{state.get('range_km', 0.0):.1f}"
 
         cell_values = state.get("cell_voltages") or []
         cells_screen = screen_manager.get_screen("cells")
