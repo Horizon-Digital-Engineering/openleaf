@@ -67,8 +67,9 @@ class LeafStateServer:
             read_dtcs = getattr(self.transport, "read_dtcs", None)
             if callable(read_dtcs):
                 try:
-                    dtcs = read_dtcs()
-                    return {"dtcs": dtcs}
+                    results = read_dtcs()
+                    # results is Dict[str, List[str]] - ECU name -> list of DTCs
+                    return {"ecus": results}
                 except Exception as e:
                     raise HTTPException(status_code=500, detail=str(e)) from e
             raise HTTPException(status_code=501, detail="DTC reading not supported")

@@ -493,30 +493,27 @@ class OBD2Transport(Transport):
 
         return results
 
-    def read_dtcs(self) -> List[str]:
+    def read_dtcs(self) -> Dict[str, List[str]]:
         """Read DTCs from all ECUs defined in YAML.
 
         Returns:
-            List of DTC codes from all accessible ECUs
+            Dict mapping ECU name to list of DTC codes (empty list = no DTCs)
         """
-        all_dtcs = []
+        results: Dict[str, List[str]] = {}
 
         for ecu in self.ecus:
             if not ecu.supports_dtc:
                 continue
             try:
                 dtcs = self.protocol.read_dtcs(ecu_id=ecu.id)
-                if dtcs:
-                    # Prefix with ECU name for clarity
-                    prefixed = [f"{ecu.name}:{code}" for code in dtcs]
-                    all_dtcs.extend(prefixed)
-                    self._record_event("dtc", f"{ecu.name} DTCs: {dtcs}")
-                else:
-                    self._record_event("dtc", f"{ecu.name}: No DTCs")
+                results[ecu.name] = dtcs if dtcs else []
+                self._record_event("dtc", f"{ecu.name}: {dtcs if dtcs else 'OK'}")
             except Exception as e:
+                # ECU didn't respond - mark as error
+                results[ecu.name] = ["ERROR"]
                 self.logger.debug(f"Failed to read {ecu.name} DTCs: {e}")
 
-        return all_dtcs
+        return results
 
     def debug_log(self) -> List[str]:
         """Return recent debug log entries."""

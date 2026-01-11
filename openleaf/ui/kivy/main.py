@@ -111,29 +111,58 @@ class OpenLeafApp(App):
         debug_log = state.get("_debug_log") or []
         self._update_debug_view(screen_manager, debug_log)
 
-    def _update_dtc_view(self, screen_manager, dtcs: list[str]) -> None:
-        if dtcs == self._last_dtcs:
+    def _update_dtc_view(self, screen_manager, ecu_results: dict[str, list[str]]) -> None:
+        if ecu_results == self._last_dtcs:
             return
-        self._last_dtcs = list(dtcs)
+        self._last_dtcs = dict(ecu_results)
         dtc_screen = screen_manager.get_screen("dtcs")
         dtc_view = dtc_screen.children[0]
         dtc_ids = dtc_view.ids
         dtc_container = dtc_ids.dtc_container
         dtc_container.clear_widgets()
-        dtc_ids.dtc_empty.opacity = 1 if not dtcs else 0
-        if not dtcs:
-            return
-        for code in dtcs:
-            button = Button(
-                text=code,
-                size_hint_y=None,
-                height=dp(60),
-                font_size="26sp",
-                background_normal="",
-                background_color=(0.18, 0.28, 0.35, 1),
-            )
-            button.bind(on_release=lambda _, c=code: self.show_dtc_detail(c))
-            dtc_container.add_widget(button)
+
+        # Always show results - even if all OK
+        dtc_ids.dtc_empty.opacity = 0
+
+        for ecu_name, codes in ecu_results.items():
+            if not codes:
+                # No DTCs - show OK
+                label = Button(
+                    text=f"{ecu_name}: OK",
+                    size_hint_y=None,
+                    height=dp(50),
+                    font_size="22sp",
+                    background_normal="",
+                    background_color=(0.15, 0.35, 0.20, 1),  # Green-ish
+                    disabled=True,
+                )
+                dtc_container.add_widget(label)
+            elif codes == ["ERROR"]:
+                # ECU didn't respond
+                label = Button(
+                    text=f"{ecu_name}: No Response",
+                    size_hint_y=None,
+                    height=dp(50),
+                    font_size="22sp",
+                    background_normal="",
+                    background_color=(0.35, 0.25, 0.15, 1),  # Orange-ish
+                    disabled=True,
+                )
+                dtc_container.add_widget(label)
+            else:
+                # Has DTCs - show each one
+                for code in codes:
+                    full_code = f"{ecu_name}:{code}"
+                    button = Button(
+                        text=full_code,
+                        size_hint_y=None,
+                        height=dp(60),
+                        font_size="26sp",
+                        background_normal="",
+                        background_color=(0.45, 0.18, 0.18, 1),  # Red-ish
+                    )
+                    button.bind(on_release=lambda _, c=full_code: self.show_dtc_detail(c))
+                    dtc_container.add_widget(button)
 
     def on_stop(self) -> None:
         if self._polling_future:
@@ -167,19 +196,24 @@ class OpenLeafApp(App):
         asyncio.run_coroutine_threadsafe(_clear(), self._loop)
 
     def pull_dtcs(self) -> None:
-        self.show_toast("Reading DTCs...")
+        self.show_toast("Scanning ECUs...")
 
         async def _read() -> None:
             try:
-                dtcs = await self.api_client.read_dtcs()
-                if dtcs:
-                    self.show_toast(f"Found {len(dtcs)} DTC(s)")
-                    # Update the DTC view
-                    if self.root:
-                        screen_manager = self.root.ids.screen_manager
-                        self._update_dtc_view(screen_manager, dtcs)
+                ecu_results = await self.api_client.read_dtcs()
+                # Count total DTCs (excluding OK and ERROR)
+                total_dtcs = sum(
+                    len(codes) for codes in ecu_results.values()
+                    if codes and codes != ["ERROR"]
+                )
+                if total_dtcs > 0:
+                    self.show_toast(f"Found {total_dtcs} DTC(s)")
                 else:
-                    self.show_toast("No DTCs found")
+                    self.show_toast(f"Scanned {len(ecu_results)} ECUs - All OK")
+                # Update the DTC view
+                if self.root:
+                    screen_manager = self.root.ids.screen_manager
+                    self._update_dtc_view(screen_manager, ecu_results)
             except Exception as e:
                 self.show_toast(f"Error: {e}")
 
