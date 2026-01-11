@@ -23,6 +23,9 @@ class LeafState:
     soh_alt: float = 0.0  # From 0x5B3 byte shift method
     soh_precise: float = 0.0  # High precision from Service 0x21
 
+    # Battery Health - From UDS Group 1
+    battery_hx: float = 0.0  # Internal resistance health (100% = new)
+
     # Battery Capacity
     gids: float = 0.0  # Remaining capacity in 80Wh units
     stored_energy_gids: float = 0.0  # From 0x5B3
@@ -37,7 +40,7 @@ class LeafState:
     pack_temp_c: float = 0.0  # Average temperature
     temp_sensor_1: float = 0.0  # Individual sensor 1
     temp_sensor_2: float = 0.0  # Individual sensor 2
-    temp_sensor_3: float = 0.0  # Individual sensor 3
+    temp_sensor_3: float = 0.0  # Individual sensor 3 (255 = not present)
     temp_sensor_4: float = 0.0  # Individual sensor 4
 
     # Cell Voltages
@@ -48,7 +51,8 @@ class LeafState:
     cell_delta_mv: float = 0.0  # Legacy field (same as cell_v_delta)
 
     # Cell Balancing
-    balancing_bitmap: List[int] = field(default_factory=list)  # Bitmap of balancing cells
+    balancing_active: float = 0.0  # First byte of balancing status (0=off, 1=on)
+    balancing_bitmap: List[int] = field(default_factory=list)  # Full bitmap (legacy)
 
     # Motor & Inverter
     motor_voltage: float = 0.0

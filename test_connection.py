@@ -14,6 +14,8 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
+from dataclasses import asdict
+
 from openleaf.config import load_config
 from openleaf.state import LeafState
 from openleaf.transports.obd2_unified import OBD2Transport
@@ -32,7 +34,11 @@ def main():
 
     # Create transport
     print(f"🔌 Creating OBD2 transport...")
-    transport = OBD2Transport(**config["transport"])
+    transport_config = asdict(config.transport)
+    # Remove keys not expected by OBD2Transport
+    transport_config.pop("type", None)
+    transport_config.pop("baudrate", None)
+    transport = OBD2Transport(**transport_config)
 
     print(f"✅ Loaded {len(transport.pids)} PID definitions")
     print(f"\nPIDs to query:")

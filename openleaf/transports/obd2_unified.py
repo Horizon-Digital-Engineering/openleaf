@@ -12,7 +12,14 @@ import yaml
 
 from .base import Transport
 from .connections import BLEConnection, OBDConnection, SerialConnection
-from .elm327 import ELM327Protocol, PidDefinition, PidSignal, decode_pid_response
+from .elm327 import (
+    BroadcastFrame,
+    ELM327Protocol,
+    PidDefinition,
+    PidSignal,
+    decode_broadcast_frame,
+    decode_pid_response,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -94,9 +101,9 @@ class OBD2Transport(Transport):
         # Create protocol handler
         self.protocol = ELM327Protocol(self.connection, self.logger)
 
-        # Load PID definitions
+        # Load PID and broadcast definitions
         self.pid_path = Path(pid_path)
-        self.pids = self._load_pid_definitions()
+        self.pids, self.broadcast_frames = self._load_definitions()
 
         # Recording setup
         self.record_enabled = record_enabled
@@ -115,69 +122,93 @@ class OBD2Transport(Transport):
         self._debug_log: List[str] = []
         self._start_time = time.time()
 
-    def _load_pid_definitions(self) -> List[PidDefinition]:
-        """Load PID definitions from YAML file."""
+    def _load_definitions(self) -> tuple[List[PidDefinition], Dict[int, BroadcastFrame]]:
+        """Load PID and broadcast frame definitions from YAML file.
+
+        Returns:
+            Tuple of (list of PidDefinitions, dict of CAN ID -> BroadcastFrame)
+        """
         if not self.pid_path.exists():
             self.logger.warning(f"PID file not found: {self.pid_path}")
-            return []
+            return [], {}
 
         with open(self.pid_path, "r") as f:
             data = yaml.safe_load(f)
 
-        # Support both old "pids" and new "query_pids" keys
-        pid_list = data.get("query_pids", data.get("pids", []))
+        # Helper to parse hex IDs
+        def parse_id(value):
+            if isinstance(value, int):
+                return value
+            s = str(value)
+            if s.startswith("0x") or s.startswith("0X"):
+                return int(s, 16)
+            return int(s, 16) if all(c in "0123456789abcdefABCDEF" for c in s) else int(s)
 
+        # Helper to parse signal definitions
+        def parse_signal(signal_data: dict) -> Optional[PidSignal]:
+            if "start_bit" in signal_data:
+                start_bit = signal_data["start_bit"]
+                length = signal_data["length"]
+            elif "byte_offset" in signal_data:
+                start_bit = signal_data["byte_offset"] * 8
+                length = signal_data.get("byte_length", 1) * 8
+            else:
+                return None
+
+            return PidSignal(
+                key=signal_data["key"],
+                start_bit=start_bit,
+                length=length,
+                scale=signal_data.get("scale", 1.0),
+                offset=signal_data.get("offset", 0.0),
+                enum=signal_data.get("enum"),
+                encoding=signal_data.get("encoding"),
+                signed=signal_data.get("signed", False),
+                formula=signal_data.get("formula"),
+            )
+
+        # Load broadcast frames
+        broadcast_frames: Dict[int, BroadcastFrame] = {}
+        for frame_data in data.get("broadcast_frames", []):
+            can_id = parse_id(frame_data["id"])
+            signals = []
+            for signal_data in frame_data.get("signals", []):
+                signal = parse_signal(signal_data)
+                if signal:
+                    signals.append(signal)
+
+            if signals:
+                broadcast_frames[can_id] = BroadcastFrame(
+                    can_id=can_id,
+                    name=frame_data["name"],
+                    signals=signals,
+                )
+
+        # Load query PIDs
+        pid_list = data.get("query_pids", data.get("pids", []))
         pids = []
         for pid_data in pid_list:
             signals = []
             for signal_data in pid_data.get("signals", []):
-                # Handle both start_bit and byte_offset formats
-                if "start_bit" in signal_data:
-                    start_bit = signal_data["start_bit"]
-                    length = signal_data["length"]
-                elif "byte_offset" in signal_data:
-                    # Convert byte offset to bit offset
-                    start_bit = signal_data["byte_offset"] * 8
-                    length = signal_data.get("byte_length", 1) * 8
+                signal = parse_signal(signal_data)
+                if signal:
+                    signals.append(signal)
                 else:
                     self.logger.warning(f"Signal {signal_data.get('key')} missing offset info, skipping")
-                    continue
-
-                signal = PidSignal(
-                    key=signal_data["key"],
-                    start_bit=start_bit,
-                    length=length,
-                    scale=signal_data.get("scale", 1.0),
-                    offset=signal_data.get("offset", 0.0),
-                    enum=signal_data.get("enum"),
-                )
-                signals.append(signal)
-
-            # Parse request_id/response_id (handle hex strings with or without 0x prefix)
-            request_id_str = str(pid_data["request_id"])
-            response_id_str = str(pid_data["response_id"])
-            service_str = str(pid_data["service"])
-            data_id_str = str(pid_data["data_identifier"])
-
-            # Remove 0x prefix if present, then parse as hex
-            request_id = int(request_id_str.replace("0x", "").replace("0X", ""), 16)
-            response_id = int(response_id_str.replace("0x", "").replace("0X", ""), 16)
-            service = int(service_str.replace("0x", "").replace("0X", ""), 16)
-            data_identifier = int(data_id_str.replace("0x", "").replace("0X", ""), 16)
 
             pid = PidDefinition(
                 name=pid_data["name"],
-                request_id=request_id,
-                response_id=response_id,
-                service=service,
-                data_identifier=data_identifier,
+                request_id=parse_id(pid_data["request_id"]),
+                response_id=parse_id(pid_data["response_id"]),
+                service=parse_id(pid_data["service"]),
+                data_identifier=parse_id(pid_data["data_identifier"]),
                 signals=signals,
                 poll_interval_sec=pid_data.get("poll_interval_sec"),
             )
             pids.append(pid)
 
-        self.logger.info(f"Loaded {len(pids)} PID definitions from {self.pid_path}")
-        return pids
+        self.logger.info(f"Loaded {len(pids)} PIDs and {len(broadcast_frames)} broadcast frames from {self.pid_path}")
+        return pids, broadcast_frames
 
     def loop(self) -> Iterator[Dict[str, Any]]:
         """Generate state updates from the vehicle."""
@@ -285,7 +316,76 @@ class OBD2Transport(Transport):
                 self.logger.debug(f"Failed to query {pid.name}: {e}")
                 self._record_event("error", f"PID {pid.name}: {e}")
 
+        # Poll broadcast messages for SOH/SOC (every 5 seconds)
+        if current_time - self._last_poll_times.get("broadcast", 0) >= 5.0:
+            try:
+                broadcast_values = self.poll_broadcast_messages(duration_sec=1.5)
+                state.update(broadcast_values)
+                self._last_poll_times["broadcast"] = current_time
+                if broadcast_values:
+                    self._record_event("broadcast", f"Got: {broadcast_values}")
+            except Exception as e:
+                self.logger.debug(f"Broadcast monitoring failed: {e}")
+
+        # Calculate derived values
+        self._calculate_derived_values(state)
+
         return state
+
+    def _calculate_derived_values(self, state: Dict[str, Any]) -> None:
+        """Calculate derived values from raw sensor data."""
+        # Cell voltage delta (max - min)
+        if "cell_v_max" in state and "cell_v_min" in state:
+            delta = state["cell_v_max"] - state["cell_v_min"]
+            state["cell_v_delta"] = delta
+            state["cell_delta_mv"] = delta * 1000  # Also in mV
+
+        # Average pack temperature (excluding sensor errors = 255)
+        temps = []
+        for key in ["temp_sensor_1", "temp_sensor_2", "temp_sensor_3", "temp_sensor_4"]:
+            if key in state and state[key] != 255:
+                temps.append(state[key])
+        if temps:
+            state["pack_temp_c"] = sum(temps) / len(temps)
+
+    def poll_broadcast_messages(self, duration_sec: float = 1.0) -> Dict[str, Any]:
+        """Poll for broadcast CAN messages (SOH, SOC, etc).
+
+        Uses YAML-defined broadcast_frames for decoding - no hardcoded byte offsets.
+        Note: These messages typically only appear when car ignition is ON.
+
+        Args:
+            duration_sec: How long to monitor
+
+        Returns:
+            Dictionary of decoded broadcast values
+        """
+        if not self.broadcast_frames:
+            return {}
+
+        # Get list of CAN IDs we have definitions for
+        broadcast_ids = list(self.broadcast_frames.keys())
+
+        try:
+            frames = self.protocol.monitor_broadcast(broadcast_ids, duration_sec)
+        except Exception as e:
+            self.logger.debug(f"Broadcast monitoring failed: {e}")
+            return {}
+
+        result = {}
+
+        # Decode each received frame using YAML definitions
+        for can_id, data in frames.items():
+            if can_id in self.broadcast_frames:
+                frame_def = self.broadcast_frames[can_id]
+                decoded = decode_broadcast_frame(data, frame_def)
+                result.update(decoded)
+
+        # Add gids alias for stored_energy_gids (backwards compatibility)
+        if "stored_energy_gids" in result and "gids" not in result:
+            result["gids"] = result["stored_energy_gids"]
+
+        return result
 
     def _record_event(self, event_type: str, message: str) -> None:
         """Record an event to the debug log."""
@@ -298,7 +398,7 @@ class OBD2Transport(Transport):
 
     def _log_transport_start(self) -> None:
         """Log transport startup information."""
-        self.logger.info(f"Starting OBD2 transport")
+        self.logger.info("Starting OBD2 transport")
         self.logger.info(f"  Connection: {self.connection_type}")
         self.logger.info(f"  PIDs: {len(self.pids)} definitions loaded")
         self.logger.info(f"  Update interval: {self.update_interval_sec}s")

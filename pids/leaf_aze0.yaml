@@ -258,34 +258,31 @@ broadcast_frames:
 # ==============================================================================
 # ACTIVE QUERY PIDs (Diagnostic Requests via UDS Service 0x21)
 # ==============================================================================
+# NOTE: For SOH and SOC, use broadcast frames 0x5BC and 0x55B which are more
+# reliable than UDS Group 1. Group 1 data has been found unreliable by the
+# community (dalathegreat Battery-Emulator, jsphuebner stm32-car).
+# ==============================================================================
 query_pids:
-  # Group 0x01 - Precision battery data
-  - name: "Battery Detailed Status"
+  # Group 0x01 - Battery HX (internal resistance health)
+  # Raw data analysis (after 61 01 header stripped):
+  # Bytes 16-17: Battery HX value (divide by 102.4 to get percentage)
+  # HX is a key battery health indicator: 100% = new, decreases with age
+  # Example: 6236 / 102.4 = 60.9% HX for a 44% SOH battery
+  - name: "Battery Health Data"
     request_id: 0x79B
     response_id: 0x7BB
     service: 0x21
     data_identifier: 0x01
-    poll_interval_sec: 1.0
+    poll_interval_sec: 5.0
     multi_frame: true
     signals:
-      - key: "soc_true"
-        byte_offset: 0
+      # Battery HX at bytes 16-17 (value / 102.4 = percentage)
+      - key: "battery_hx"
+        byte_offset: 16
         byte_length: 2
-        scale: 0.01
+        scale: 0.009765625  # 1/102.4
         unit: "%"
-        description: "True state of charge (high precision)"
-      - key: "ah_capacity"
-        byte_offset: 2
-        byte_length: 2
-        scale: 0.01
-        unit: "Ah"
-        description: "Current amp-hour capacity"
-      - key: "soh_precise"
-        byte_offset: 4
-        byte_length: 2
-        scale: 0.01
-        unit: "%"
-        description: "Precise state of health"
+        description: "Battery HX (internal resistance health factor)"
 
   # Group 0x02 - All 96 cell voltages (48 pairs in 2S config)
   - name: "Cell Voltages"
@@ -306,6 +303,12 @@ query_pids:
         description: "Array of all 96 cell pair voltages"
 
   # Group 0x03 - Cell voltage statistics
+  # Raw data structure (after 61 03 header):
+  # Bytes 0-1: FF FF (unknown)
+  # Bytes 2-3: Some voltage or counter
+  # Bytes 4-9: Additional data
+  # Bytes 10-11: V_max (cell max voltage in mV)
+  # Bytes 12-13: V_min (cell min voltage in mV)
   - name: "Cell Voltage Stats"
     request_id: 0x79B
     response_id: 0x7BB
@@ -314,26 +317,27 @@ query_pids:
     poll_interval_sec: 2.0
     multi_frame: true
     signals:
-      - key: "cell_v_min"
-        byte_offset: 0
-        byte_length: 2
-        scale: 0.001
-        unit: "V"
-        description: "Minimum cell voltage"
       - key: "cell_v_max"
-        byte_offset: 2
+        byte_offset: 10
         byte_length: 2
         scale: 0.001
         unit: "V"
         description: "Maximum cell voltage"
-      - key: "cell_v_delta"
-        byte_offset: 4
+      - key: "cell_v_min"
+        byte_offset: 12
         byte_length: 2
         scale: 0.001
         unit: "V"
-        description: "Cell voltage spread (max - min)"
+        description: "Minimum cell voltage"
 
   # Group 0x04 - Temperature sensors (4 pack thermistors)
+  # Raw data structure (after 61 04 header):
+  # Each sensor has 3 bytes: 2-byte raw ADC + 1-byte interpreted temp in Celsius
+  # Bytes 0-2: Sensor 1 (raw ADC at 0-1, temp at 2)
+  # Bytes 3-5: Sensor 2 (raw ADC at 3-4, temp at 5)
+  # Bytes 6-8: Sensor 3 (raw ADC at 6-7, temp at 8) - often 0xFF if not present
+  # Bytes 9-11: Sensor 4 (raw ADC at 9-10, temp at 11)
+  # NOTE: 0xFF (255) indicates sensor error or not present
   - name: "Pack Temperatures"
     request_id: 0x79B
     response_id: 0x7BB
@@ -359,7 +363,7 @@ query_pids:
         byte_length: 1
         scale: 1.0
         unit: "C"
-        description: "Battery temperature sensor 3"
+        description: "Battery temperature sensor 3 (255 = not present)"
       - key: "temp_sensor_4"
         byte_offset: 11
         byte_length: 1
@@ -368,6 +372,10 @@ query_pids:
         description: "Battery temperature sensor 4"
 
   # Group 0x06 - Cell balancing shunt status
+  # Raw data: 24 bytes, each representing balancing status for ~4 cells
+  # Values: 0x00 = not balancing, 0x01 = balancing, 0x04 = other status
+  # For now, we extract the first few bytes as individual status indicators
+  # TODO: Implement proper array parsing in decoder
   - name: "Cell Balancing Status"
     request_id: 0x79B
     response_id: 0x7BB
@@ -376,8 +384,10 @@ query_pids:
     poll_interval_sec: 10.0
     multi_frame: true
     signals:
-      - key: "balancing_bitmap"
+      # First 4 cell balancing status bytes as a combined value
+      # Can check individual cells by looking at the bits
+      - key: "balancing_active"
         byte_offset: 0
-        byte_length: 12  # 96 bits for 96 cell pairs
-        encoding: "bitmap"
-        description: "Bitmap of which cells are actively balancing"
+        byte_length: 1
+        scale: 1.0
+        description: "Balancing status byte 1 (0=off, 1=on)"

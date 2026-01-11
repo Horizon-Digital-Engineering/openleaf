@@ -1,47 +1,38 @@
 # OpenLeaf Project Context
 
-**Last Updated:** 2026-01-10
+**Last Updated:** 2026-01-10 (Session 2)
 
-## Current Status
+## Current Status: Working with Real Car!
 
-We just completed a major expansion of the state management and testing infrastructure. The project is now ready for **real car testing** with your 2013 Leaf.
+The BLE OBD2 adapter is now successfully reading data from a 2013 Leaf. After extensive debugging, we achieved **43.6% field coverage** (17/39 fields populated).
 
-### What Just Changed
+### Latest Test Results (2026-01-10 22:53)
 
-1. **Expanded LeafState** from 7 fields to **35+ fields** to match all YAML signal definitions
-2. **Enhanced test script** to validate which fields populate and save results to JSON
-3. **Created comprehensive documentation**:
-   - [REQUIREMENTS.md](docs/REQUIREMENTS.md) - Full feature spec (LeafSpy equivalent)
-   - [IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) - Audit + checklist
-   - [QUICKSTART.md](QUICKSTART.md) - Setup guide
+| Metric | Value | Source |
+|--------|-------|--------|
+| SOH | 44% | Broadcast 0x5B3 |
+| GIDs | 85 (~6.8 kWh) | Broadcast 0x5B3 |
+| Battery HX | 60.9% | UDS Group 1 |
+| Cell Voltages | 96 cells (3.976V - 3.994V) | UDS Group 2 |
+| Cell Delta | 18mV | Calculated |
+| Pack Temp | 22.3°C | UDS Group 4 |
+| Range | 78.6 km | Broadcast 0x5A9 |
+| Balancing | Active | UDS Group 6 |
 
-### Ready to Test
+### Key Fixes This Session
 
-All code is staged and ready to commit/push. Once you pull it on your MacBook, you can:
+1. **Flow Control** - Added ATFCSH/ATFCSD/ATFCSM1 commands for multi-frame ISO-TP
+2. **Byte Offsets** - Fixed Group 1, 3, 4 offsets based on raw hex analysis
+3. **Broadcast Monitoring** - Added ATCRA filtering to prevent adapter overflow
+4. **YAML-Driven Decoding** - Refactored to eliminate all hardcoded byte positions
 
-```bash
-# Setup
-python3 -m venv venv
-source venv/bin/activate
-pip install pyyaml bleak pyserial
-
-# Configure your BLE adapter address in configs/leaf_2013_24kwh.yaml
-# Then run:
-python3 test_connection.py
-```
-
-The test will:
-- ✅ Connect via BLE to your OBD-II adapter
-- ✅ Query all 5 PIDs (Groups 0x01-0x04, 0x06)
-- ✅ Show which fields get data (✅) vs empty (⚪)
-- ✅ Save `test_results.json` with full report
-- ✅ Print success rate summary
+See [docs/IMPLEMENTATION_LOG.md](docs/IMPLEMENTATION_LOG.md) for the full debugging journey.
 
 ## Project Architecture
 
 ### Transport Layer
 - **[openleaf/transports/obd2_unified.py](openleaf/transports/obd2_unified.py)** - Main transport with BLE/Serial support
-- **[openleaf/transports/elm327.py](openleaf/transports/elm327.py)** - ELM327 protocol handler
+- **[openleaf/transports/elm327.py](openleaf/transports/elm327.py)** - ELM327 protocol handler (ISO-TP, Flow Control, Broadcast)
 - **[openleaf/transports/connections/](openleaf/transports/connections/)** - BLE/Serial connection implementations
 
 ### State Management
@@ -52,102 +43,83 @@ The test will:
 - **[pids/leaf_ze0.yaml](pids/leaf_ze0.yaml)** - 2011-2012 (24kWh)
 - **[pids/leaf_ze1.yaml](pids/leaf_ze1.yaml)** - 2018+ (40/62kWh)
 
-Each YAML has:
-- `metadata` (generation, years, battery specs)
-- `broadcast_frames` (passive CAN monitoring - not yet integrated)
-- `query_pids` (active UDS Service 0x21 queries - **working now**)
+Each YAML now has:
+- `metadata` - Generation, years, battery specs
+- `broadcast_frames` - Passive CAN monitoring (SOH, SOC, GIDs, etc.)
+- `query_pids` - Active UDS Service 0x21 queries
 
 ### API Layer
 - **[openleaf/server.py](openleaf/server.py)** - FastAPI server (port 8000)
-- Endpoints: `/health`, `/state`, `/command/clear_dtcs`
-
-### UI Layer
-- **[openleaf/ui/kivy/](openleaf/ui/kivy/)** - Kivy touchscreen app
-- Basic dashboard exists, needs expansion
 
 ## Your 2013 Leaf Data
 
-From the CAN capture analysis ([docs/ref/can_analysis_2013_leaf.md](docs/ref/can_analysis_2013_leaf.md)):
-
-- **Battery Health:** 44% SOH
-- **Remaining Capacity:** 126 GIDs = 10.08 kWh
-- **Generation:** AZE0 (2013-2017)
-- **Battery:** 24kWh AESC LMO
+| Metric | Value |
+|--------|-------|
+| Generation | AZE0 (2013-2017) |
+| Battery | 24kWh AESC LMO |
+| SOH | 44% |
+| Remaining Capacity | ~85 GIDs = 6.8 kWh |
+| HX (Internal Resistance) | 60.9% |
 
 ## What's Working
 
-✅ BLE/Serial connections implemented
-✅ ELM327 protocol with ISO-TP multi-frame support
-✅ Active PID queries (Service 0x21)
-✅ YAML loader supports both formats (start_bit + byte_offset)
-✅ State management with 35+ fields
-✅ Test script with validation tracking
+- BLE/Serial connections
+- ELM327 protocol with ISO-TP flow control
+- Active PID queries (Service 0x21 Groups 1-4, 6)
+- Passive broadcast monitoring (0x5B3, 0x5A9)
+- All 96 cell voltages with correct scaling
+- Temperature sensors (4 thermistors)
+- YAML-driven signal decoding (no hardcoded offsets)
 
 ## What's Missing
 
-❌ Not tested with real car yet (**MAIN BLOCKER**)
-❌ Passive monitoring not integrated (active queries only)
-❌ UI needs cells/health/DTC screens
-❌ Power limits (0x1DC) not in YAML yet
+- **pack_voltage, pack_current** - 0x1DB broadcast (not captured yet)
+- **soc_display, soc_precise** - Need 0x5BC/0x55B captures
+- **Motor/inverter data** - Only while driving
+- **Charger data** - Only while charging
+- **UI screens** - Cells, health, DTC displays
+
+## Quick Start
+
+```bash
+# Setup
+python3 -m venv venv
+source venv/bin/activate
+pip install pyyaml bleak pyserial
+
+# Test connection (car must be ON)
+python3 test_connection.py
+
+# Review results
+cat test_results.json | python3 -m json.tool
+```
+
+## Code Quality
+
+The codebase is structured for reuse with any Leaf generation:
+
+1. **YAML-driven** - All signal definitions in YAML files
+2. **No hardcoded offsets** - `decode_pid_response()` and `decode_broadcast_frame()` are generic
+3. **Pluggable transports** - BLE/Serial use same OBD2Transport class
+4. **Easy to add cars** - Just create a new YAML and point config at it
+
+## Key Documentation
+
+- [docs/IMPLEMENTATION_LOG.md](docs/IMPLEMENTATION_LOG.md) - Debugging journey and solutions
+- [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) - Feature checklist
+- [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) - Full feature spec
+- [docs/ref/](docs/ref/) - DBC files and CAN analysis
 
 ## Next Steps
 
-1. **Push this code** (need to configure git first)
-2. **Pull on MacBook**
-3. **Test with 2013 Leaf** using test_connection.py
-4. **Review test_results.json** to see what works
-5. **Update UI** based on working signals
+1. **Capture more broadcast messages** - Drive/charge to get 0x1DB, 0x1DA, 0x380
+2. **Expand UI** - Add cell voltage display, health screen
+3. **Add logging** - Record trips for analysis
+4. **Test other generations** - Verify ZE0/ZE1 YAML files
 
-## Git Setup Needed
+## Known Quirks
 
-Before you can push, configure git identity:
-
-```bash
-git config user.email "your-email@example.com"
-git config user.name "Your Name"
-```
-
-For SSH (recommended):
-```bash
-# Generate key if needed
-ssh-keygen -t ed25519 -C "your-email@example.com"
-
-# Add to GitHub: https://github.com/settings/keys
-cat ~/.ssh/id_ed25519.pub
-
-# Change remote to SSH
-git remote set-url origin git@github.com:USERNAME/openleaf.git
-```
-
-## Key Files to Review on MacBook
-
-1. **[IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md)** - See what's done vs missing
-2. **[REQUIREMENTS.md](docs/REQUIREMENTS.md)** - Full feature spec
-3. **[pids/leaf_aze0.yaml](pids/leaf_aze0.yaml)** - All 35+ signals for your car
-4. **[test_connection.py](test_connection.py)** - Test script to run first
-
-## Known Issues
-
-1. Cell voltage query is slow (~5 seconds for 96 values)
-2. ZE1 cars have gateway blocking (requires car ON mode) - doesn't affect you
-3. Charge history queries unknown (need research)
-4. No WebSocket support yet (polling only)
-
-## Reference Files Added
-
-- All DBC files in [docs/ref/](docs/ref/)
-- Real CAN capture from your 2013 Leaf
-- Generation breakdown document
-- CAN data analysis
-
-## Questions to Answer via Testing
-
-1. Do all 5 PID groups respond?
-2. Does cell voltage query (96 cells) work?
-3. Do temperature sensors (4 sensors) all work?
-4. What's the actual query latency?
-5. Does BLE adapter handle multi-frame responses correctly?
-
----
-
-**Status:** Ready to push and test on real hardware!
+- **Car must be ON** - Broadcast messages only transmit with ignition on
+- **Cheap adapters need CAN filtering** - ATCRA prevents buffer overflow
+- **Temp sensor 3 returns 255** - Not present on all packs (normal)
+- **Group 1 SOH/SOC unreliable** - Use broadcast 0x5B3 instead

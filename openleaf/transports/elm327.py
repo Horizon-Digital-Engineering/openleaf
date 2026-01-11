@@ -12,9 +12,9 @@ LOGGER = logging.getLogger(__name__)
 HANDSHAKE_COMMANDS = [
     "ATZ",    # Reset
     "ATI",    # Identify
-    "ATL1",   # Linefeeds on
+    "ATL0",   # Linefeeds off (reduces data for BLE)
+    "ATS0",   # Spaces off (reduces data for BLE)
     "ATH1",   # Headers on
-    "ATS1",   # Spaces on
     "ATAL",   # Allow long messages
     "ATSP6",  # Set protocol to ISO 15765-4 CAN (11 bit ID, 500 kbaud)
 ]
@@ -30,6 +30,18 @@ class PidSignal:
     scale: float = 1.0
     offset: float = 0.0
     enum: Optional[Dict[int, Any]] = None
+    encoding: Optional[str] = None  # "array_u16_be" for cell voltage arrays
+    signed: bool = False
+    formula: Optional[str] = None  # e.g., "value >> 1" for bit shifts
+
+
+@dataclass(slots=True)
+class BroadcastFrame:
+    """Definition for a passive CAN broadcast message."""
+
+    can_id: int
+    name: str
+    signals: List[PidSignal]
 
 
 @dataclass(slots=True)
@@ -100,16 +112,124 @@ class ELM327Protocol:
         if not self.initialized:
             self.initialize()
 
-        # Set the CAN header for this PID
+        # Configure flow control for multi-frame responses
+        # ATFCSH: Set flow control header (where we send FC frames TO)
+        # ATFCSD: Set flow control data (30=CTS, 00=block size, 00=sep time)
+        # ATFCSM1: Enable user-defined flow control mode
+        self.send_command(f"ATFCSH{pid.request_id:03X}")
+        self.send_command("ATFCSD300000")
+        self.send_command("ATFCSM1")
+
+        # Set the CAN header for this PID request
         self.send_command(f"ATSH{pid.request_id:03X}")
 
         # Build and send the request
         request = self._build_pid_request(pid)
         response = self.send_command(request)
 
-        # Parse the response
+        # Parse response (flow control is automatic now)
         lines = response.strip().split('\n') if response else []
         return self._parse_isotp_response(lines, pid.response_id)
+
+    def monitor_broadcast(self, can_ids: List[int], duration_sec: float = 2.0) -> Dict[int, bytes]:
+        """Monitor CAN bus for broadcast messages (passive sniffing).
+
+        Uses ATCRA to filter specific CAN IDs, then ATMA to capture traffic.
+        This is more reliable than monitoring all traffic on cheap adapters.
+
+        Args:
+            can_ids: List of CAN IDs to watch for (e.g., [0x5BC, 0x5B3, 0x55B])
+            duration_sec: How long to monitor
+
+        Returns:
+            Dict mapping CAN ID to last received frame data
+        """
+        if not self.connection.is_connected():
+            self.connection.connect_sync()
+
+        if not self.initialized:
+            self.initialize()
+
+        results: Dict[int, bytes] = {}
+
+        # Monitor each CAN ID separately with filter (more reliable)
+        for can_id in can_ids:
+            try:
+                self.send_command("ATCAF0")  # Raw frames
+                self.send_command(f"ATCRA{can_id:03X}")  # Filter to this ID only
+
+                self.connection.send_sync("ATMA")
+
+                import time
+                start = time.time()
+                per_id_time = min(duration_sec / len(can_ids), 0.5)
+
+                while time.time() - start < per_id_time:
+                    try:
+                        chunk = self.connection.receive_sync(timeout=0.2)
+                        if chunk:
+                            for line in chunk.split():
+                                line = line.strip()
+                                if line.startswith(f"{can_id:03X}") and len(line) >= 5:
+                                    hex_data = line[3:]
+                                    if len(hex_data) >= 2:
+                                        data = bytes([int(hex_data[i:i+2], 16)
+                                                     for i in range(0, min(len(hex_data), 16), 2)])
+                                        results[can_id] = data
+                                        break  # Got one frame, move to next ID
+                            if can_id in results:
+                                break
+                    except Exception:
+                        pass
+
+                # Stop monitoring
+                self.connection.send_sync("")
+
+            except Exception:
+                pass
+
+        # Reset filters and restore normal mode
+        try:
+            self.send_command("ATAR")  # Reset CAN filters
+            self.send_command("ATCAF1")  # Re-enable CAN formatting
+        except Exception:
+            pass
+
+        return results
+
+    def _check_for_first_frame(self, lines: Sequence[str], response_id: int) -> Optional[tuple[int, List[int]]]:
+        """Check if response contains a First Frame requiring flow control.
+
+        Args:
+            lines: Response lines from ELM327
+            response_id: Expected CAN ID
+
+        Returns:
+            Tuple of (total_length, first_frame_data) if First Frame found, None otherwise
+        """
+        expected_header = f"{response_id:X}".upper()
+
+        for line in lines:
+            parts = line.strip().split()
+            if not parts:
+                continue
+
+            header = parts[0].upper()
+            if header != expected_header and not header.endswith(expected_header):
+                continue
+
+            data_bytes = [int(part, 16) for part in parts[1:]]
+            if not data_bytes:
+                continue
+
+            pci = data_bytes[0]
+            frame_type = pci >> 4
+
+            if frame_type == 1:  # First Frame
+                total_length = ((pci & 0x0F) << 8) | data_bytes[1]
+                return (total_length, data_bytes[2:])
+
+        return None
 
     def _build_pid_request(self, pid: PidDefinition) -> str:
         """Build OBD2 request string for a PID.
@@ -143,17 +263,36 @@ class ELM327Protocol:
         total_length: Optional[int] = None
 
         for line in lines:
-            parts = line.strip().split()
-            if not parts:
+            line = line.strip()
+            if not line:
                 continue
 
-            # Check if this line has the expected header
-            header = parts[0].upper()
-            if header != expected_header and not header.endswith(expected_header):
-                continue
+            # Parse line - handle both spaced and compact formats
+            # Spaced: "7BB 10 29 61 01 00 00 05 C9"
+            # Compact: "7BB102961010000005C9"
+            data_bytes: List[int] = []
+            if ' ' in line:
+                parts = line.split()
+                header = parts[0].upper()
+                if header != expected_header and not header.endswith(expected_header):
+                    continue
+                try:
+                    data_bytes = [int(part, 16) for part in parts[1:]]
+                except ValueError:
+                    continue
+            else:
+                # Compact format - header is first 3 chars, rest is hex pairs
+                line_upper = line.upper()
+                if not line_upper.startswith(expected_header):
+                    continue
+                hex_data = line_upper[len(expected_header):]
+                if len(hex_data) < 2:
+                    continue
+                try:
+                    data_bytes = [int(hex_data[i:i+2], 16) for i in range(0, len(hex_data), 2)]
+                except ValueError:
+                    continue
 
-            # Extract data bytes (skip the header)
-            data_bytes = [int(part, 16) for part in parts[1:]]
             if not data_bytes:
                 continue
 
@@ -214,17 +353,42 @@ def decode_pid_response(response_bytes: bytes, pid: PidDefinition) -> Dict[str, 
     Returns:
         Dictionary of signal key -> decoded value
     """
-    # Strip response prefix if present
-    if len(response_bytes) >= 3:
-        expected_prefix = bytes([pid.service + 0x40,
-                                *pid.data_identifier.to_bytes(2, "big")[:2]])
-        if response_bytes.startswith(expected_prefix[:2]):
-            response_bytes = response_bytes[len(expected_prefix):]
+    # Strip response prefix (service response + PID)
+    # Response service is request service + 0x40
+    # PID can be 1 or 2 bytes depending on value
+    if len(response_bytes) >= 2:
+        response_service = pid.service + 0x40
+        if response_bytes[0] == response_service:
+            if pid.data_identifier <= 0xFF:
+                # 1-byte PID: strip 2 bytes (service + pid)
+                if len(response_bytes) >= 2 and response_bytes[1] == pid.data_identifier:
+                    response_bytes = response_bytes[2:]
+            else:
+                # 2-byte PID: strip 3 bytes (service + 2-byte pid)
+                pid_bytes = pid.data_identifier.to_bytes(2, "big")
+                if len(response_bytes) >= 3 and response_bytes[1:3] == pid_bytes:
+                    response_bytes = response_bytes[3:]
 
     result = {}
     for signal in pid.signals:
-        # Extract bits
         start_byte = signal.start_bit // 8
+        num_bytes = signal.length // 8
+
+        # Handle special encodings
+        if signal.encoding == "array_u16_be":
+            # Parse as array of big-endian 16-bit values
+            values = []
+            end_byte = start_byte + num_bytes
+            if end_byte <= len(response_bytes):
+                for i in range(start_byte, end_byte, 2):
+                    if i + 1 < len(response_bytes):
+                        val = (response_bytes[i] << 8) | response_bytes[i + 1]
+                        scaled = val * signal.scale + signal.offset
+                        values.append(scaled)
+            result[signal.key] = values
+            continue
+
+        # Standard scalar extraction
         end_byte = (signal.start_bit + signal.length - 1) // 8
 
         if end_byte >= len(response_bytes):
@@ -257,5 +421,63 @@ def decode_pid_response(response_bytes: bytes, pid: PidDefinition) -> Dict[str, 
             result[signal.key] = signal.enum.get(value, value)
         else:
             result[signal.key] = value * signal.scale + signal.offset
+
+    return result
+
+
+def decode_broadcast_frame(data: bytes, frame: BroadcastFrame) -> Dict[str, Any]:
+    """Decode a broadcast CAN frame using signal definitions.
+
+    Args:
+        data: Raw CAN frame data bytes
+        frame: Broadcast frame definition with signals
+
+    Returns:
+        Dictionary of signal key -> decoded value
+    """
+    result = {}
+
+    for signal in frame.signals:
+        start_byte = signal.start_bit // 8
+        bit_in_byte = signal.start_bit % 8
+
+        # Calculate how many bytes we need
+        bits_needed = signal.length
+        num_bytes = (bit_in_byte + bits_needed + 7) // 8
+
+        if start_byte + num_bytes > len(data):
+            continue
+
+        # Extract the raw value
+        value = 0
+        for i in range(num_bytes):
+            value = (value << 8) | data[start_byte + i]
+
+        # Shift to align the bits we want
+        # Total bits we have: num_bytes * 8
+        # We want bits starting at bit_in_byte
+        # Shift right by: (num_bytes * 8) - bit_in_byte - bits_needed
+        shift = (num_bytes * 8) - bit_in_byte - bits_needed
+        if shift > 0:
+            value >>= shift
+
+        # Mask to get only the bits we need
+        mask = (1 << bits_needed) - 1
+        value &= mask
+
+        # Handle signed values
+        if signal.signed and value >= (1 << (bits_needed - 1)):
+            value -= (1 << bits_needed)
+
+        # Apply formula if present (e.g., "value >> 1")
+        if signal.formula:
+            try:
+                value = eval(signal.formula)  # Safe since we control the YAML
+            except Exception:
+                pass
+
+        # Apply scaling and offset
+        scaled = value * signal.scale + signal.offset
+        result[signal.key] = scaled
 
     return result

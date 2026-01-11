@@ -72,12 +72,13 @@ class BLEConnection(OBDConnection):
         self._loop_ready.set()
         self._loop.run_forever()
 
-    def _run_async(self, coro) -> Any:
+    def _run_async(self, coro, timeout_override: float = None) -> Any:
         """Run async coroutine in the background loop."""
         if not self._loop:
             raise RuntimeError("Event loop not started")
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
-        return future.result(timeout=self.timeout * 2)
+        timeout = timeout_override if timeout_override else max(self.timeout * 2, 10.0)
+        return future.result(timeout=timeout)
 
     def connect_sync(self) -> None:
         """Connect to BLE adapter."""
@@ -124,7 +125,7 @@ class BLEConnection(OBDConnection):
     async def _send(self, command: str) -> None:
         """Async send implementation."""
         data = command.encode('ascii')
-        await self._client.write_gatt_char(self.write_char_uuid, data, response=False)
+        await self._client.write_gatt_char(self.write_char_uuid, data, response=True)
 
     def receive_sync(self, timeout: Optional[float] = None) -> str:
         """Receive response from adapter until '>' prompt.
@@ -207,5 +208,10 @@ class BLEConnection(OBDConnection):
         while '\r' in self._rx_buffer:
             line, self._rx_buffer = self._rx_buffer.split('\r', 1)
             line = line.strip()
-            if line or line == '>':  # Include empty prompt
+            if line:
                 self._line_queue.put(line)
+
+        # Check if buffer ends with prompt (no trailing \r)
+        if self._rx_buffer.strip() == '>':
+            self._line_queue.put('>')
+            self._rx_buffer = ''
