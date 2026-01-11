@@ -167,7 +167,23 @@ class OpenLeafApp(App):
         asyncio.run_coroutine_threadsafe(_clear(), self._loop)
 
     def pull_dtcs(self) -> None:
-        self.show_toast("Pull DTCs not implemented yet")
+        self.show_toast("Reading DTCs...")
+
+        async def _read() -> None:
+            try:
+                dtcs = await self.api_client.read_dtcs()
+                if dtcs:
+                    self.show_toast(f"Found {len(dtcs)} DTC(s)")
+                    # Update the DTC view
+                    if self.root:
+                        screen_manager = self.root.ids.screen_manager
+                        self._update_dtc_view(screen_manager, dtcs)
+                else:
+                    self.show_toast("No DTCs found")
+            except Exception as e:
+                self.show_toast(f"Error: {e}")
+
+        asyncio.run_coroutine_threadsafe(_read(), self._loop)
 
     def show_dtc_detail(self, code: str) -> None:
         self.show_toast(f"{code}: detail lookup TBD")

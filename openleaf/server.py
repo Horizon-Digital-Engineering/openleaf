@@ -62,13 +62,29 @@ class LeafStateServer:
                     return {"log": []}
             return {"log": []}
 
+        @self.app.get("/dtcs")
+        def get_dtcs() -> Dict[str, Any]:
+            read_dtcs = getattr(self.transport, "read_dtcs", None)
+            if callable(read_dtcs):
+                try:
+                    dtcs = read_dtcs()
+                    return {"dtcs": dtcs}
+                except Exception as e:
+                    raise HTTPException(status_code=500, detail=str(e)) from e
+            raise HTTPException(status_code=501, detail="DTC reading not supported")
+
         @self.app.post("/command/clear_dtcs")
         def clear_dtcs() -> Dict[str, Any]:
-            try:
-                self.transport.send_command("CLEAR_DTC")
-            except NotImplementedError as exc:  # pragma: no cover - transports may override later
-                raise HTTPException(status_code=501, detail=str(exc)) from exc
-            return {"status": "ok"}
+            clear_fn = getattr(self.transport, "clear_dtcs", None)
+            if callable(clear_fn):
+                try:
+                    results = clear_fn()
+                    # Check if all succeeded
+                    all_ok = all(results.values()) if results else False
+                    return {"status": "ok" if all_ok else "partial", "results": results}
+                except Exception as e:
+                    raise HTTPException(status_code=500, detail=str(e)) from e
+            raise HTTPException(status_code=501, detail="DTC clearing not supported")
 
     def _create_transport(self) -> Transport:
         transport_type = self.config.transport.type

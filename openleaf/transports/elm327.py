@@ -197,6 +197,119 @@ class ELM327Protocol:
 
         return results
 
+    def read_dtcs(self, ecu_id: int = 0x7E4) -> List[str]:
+        """Read Diagnostic Trouble Codes from an ECU using UDS Service 0x19.
+
+        Args:
+            ecu_id: ECU request ID (default 0x7E4 for Leaf battery, 0x797 for VCM)
+
+        Returns:
+            List of DTC codes as strings (e.g., ["P0A80", "U1000"])
+        """
+        if not self.connection.is_connected():
+            self.connection.connect_sync()
+
+        if not self.initialized:
+            self.initialize()
+
+        response_id = ecu_id + 8  # Response ID is typically request + 8
+
+        # Set up for this ECU
+        self.send_command(f"ATFCSH{ecu_id:03X}")
+        self.send_command("ATFCSD300000")
+        self.send_command("ATFCSM1")
+        self.send_command(f"ATSH{ecu_id:03X}")
+
+        # UDS Service 0x19 sub-function 0x02: reportDTCByStatusMask
+        # 0xFF = all DTCs (confirmed, pending, etc.)
+        response = self.send_command("19 02 FF")
+
+        if not response:
+            return []
+
+        lines = response.strip().split('\n')
+        payload = self._parse_isotp_response(lines, response_id)
+
+        return self._decode_dtcs(payload)
+
+    def _decode_dtcs(self, payload: bytes) -> List[str]:
+        """Decode DTC bytes into human-readable codes.
+
+        UDS response format for Service 0x19 sub 0x02:
+        - Byte 0: 0x59 (positive response)
+        - Byte 1: 0x02 (sub-function echo)
+        - Byte 2: Availability status mask
+        - Bytes 3+: DTC records (3 bytes DTC + 1 byte status each)
+
+        DTC encoding (ISO 15031-6):
+        - First 2 bits = type: 00=P, 01=C, 10=B, 11=U
+        - Next 14 bits = 4 hex digits
+        """
+        dtcs = []
+
+        if len(payload) < 3:
+            return dtcs
+
+        # Check for positive response (0x59)
+        if payload[0] != 0x59:
+            LOGGER.debug(f"DTC read failed, response: {payload.hex()}")
+            return dtcs
+
+        # Skip header (0x59 0x02 status_mask)
+        dtc_data = payload[3:]
+
+        # Each DTC is 4 bytes: 3 bytes DTC code + 1 byte status
+        for i in range(0, len(dtc_data) - 3, 4):
+            dtc_bytes = dtc_data[i:i+3]
+
+            # Decode DTC type from first 2 bits
+            type_code = (dtc_bytes[0] >> 6) & 0x03
+            type_char = ['P', 'C', 'B', 'U'][type_code]
+
+            # Remaining 14 bits form the 4-digit code
+            code_value = ((dtc_bytes[0] & 0x3F) << 8) | dtc_bytes[1]
+            sub_code = dtc_bytes[2]
+
+            # Format as standard DTC (e.g., P0A80)
+            dtc = f"{type_char}{code_value:04X}"
+            if sub_code != 0:
+                dtc += f"-{sub_code:02X}"
+
+            dtcs.append(dtc)
+
+        return dtcs
+
+    def clear_dtcs(self, ecu_id: int = 0x7E4) -> bool:
+        """Clear Diagnostic Trouble Codes using UDS Service 0x14.
+
+        Args:
+            ecu_id: ECU request ID
+
+        Returns:
+            True if successful
+        """
+        if not self.connection.is_connected():
+            self.connection.connect_sync()
+
+        if not self.initialized:
+            self.initialize()
+
+        response_id = ecu_id + 8
+
+        self.send_command(f"ATSH{ecu_id:03X}")
+
+        # UDS Service 0x14: Clear DTC, 0xFFFFFF = all groups
+        response = self.send_command("14 FF FF FF")
+
+        if not response:
+            return False
+
+        lines = response.strip().split('\n')
+        payload = self._parse_isotp_response(lines, response_id)
+
+        # Positive response is 0x54
+        return len(payload) > 0 and payload[0] == 0x54
+
     def _check_for_first_frame(self, lines: Sequence[str], response_id: int) -> Optional[tuple[int, List[int]]]:
         """Check if response contains a First Frame requiring flow control.
 

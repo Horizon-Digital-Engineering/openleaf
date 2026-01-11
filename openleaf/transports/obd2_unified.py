@@ -21,7 +21,19 @@ from .elm327 import (
     decode_pid_response,
 )
 
+from dataclasses import dataclass
+
 LOGGER = logging.getLogger(__name__)
+
+
+@dataclass
+class EcuDefinition:
+    """ECU definition loaded from YAML."""
+    id: int
+    response_id: int
+    name: str
+    description: str = ""
+    supports_dtc: bool = True
 
 
 class OBD2Transport(Transport):
@@ -101,9 +113,9 @@ class OBD2Transport(Transport):
         # Create protocol handler
         self.protocol = ELM327Protocol(self.connection, self.logger)
 
-        # Load PID and broadcast definitions
+        # Load PID, broadcast, and ECU definitions
         self.pid_path = Path(pid_path)
-        self.pids, self.broadcast_frames = self._load_definitions()
+        self.pids, self.broadcast_frames, self.ecus = self._load_definitions()
 
         # Recording setup
         self.record_enabled = record_enabled
@@ -122,15 +134,15 @@ class OBD2Transport(Transport):
         self._debug_log: List[str] = []
         self._start_time = time.time()
 
-    def _load_definitions(self) -> tuple[List[PidDefinition], Dict[int, BroadcastFrame]]:
-        """Load PID and broadcast frame definitions from YAML file.
+    def _load_definitions(self) -> tuple[List[PidDefinition], Dict[int, BroadcastFrame], List[EcuDefinition]]:
+        """Load PID, broadcast frame, and ECU definitions from YAML file.
 
         Returns:
-            Tuple of (list of PidDefinitions, dict of CAN ID -> BroadcastFrame)
+            Tuple of (list of PidDefinitions, dict of CAN ID -> BroadcastFrame, list of EcuDefinitions)
         """
         if not self.pid_path.exists():
             self.logger.warning(f"PID file not found: {self.pid_path}")
-            return [], {}
+            return [], {}, []
 
         with open(self.pid_path, "r") as f:
             data = yaml.safe_load(f)
@@ -207,8 +219,20 @@ class OBD2Transport(Transport):
             )
             pids.append(pid)
 
-        self.logger.info(f"Loaded {len(pids)} PIDs and {len(broadcast_frames)} broadcast frames from {self.pid_path}")
-        return pids, broadcast_frames
+        # Load ECU definitions
+        ecus = []
+        for ecu_data in data.get("ecus", []):
+            ecu = EcuDefinition(
+                id=parse_id(ecu_data["id"]),
+                response_id=parse_id(ecu_data.get("response_id", ecu_data["id"] + 0x20)),
+                name=ecu_data["name"],
+                description=ecu_data.get("description", ""),
+                supports_dtc=ecu_data.get("supports_dtc", True),
+            )
+            ecus.append(ecu)
+
+        self.logger.info(f"Loaded {len(pids)} PIDs, {len(broadcast_frames)} broadcast frames, {len(ecus)} ECUs from {self.pid_path}")
+        return pids, broadcast_frames, ecus
 
     def loop(self) -> Iterator[Dict[str, Any]]:
         """Generate state updates from the vehicle."""
@@ -442,13 +466,57 @@ class OBD2Transport(Transport):
             command: Command to send (e.g., "CLEAR_DTC" to clear diagnostic codes)
         """
         if command == "CLEAR_DTC":
-            # Send the clear DTC command (service 0x14)
-            response = self.protocol.send_command("14")
-            self.logger.info(f"Clear DTC response: {response}")
+            self.clear_dtcs()
         else:
-            # Send raw command
             response = self.protocol.send_command(command)
             self.logger.info(f"Command '{command}' response: {response}")
+
+    def clear_dtcs(self) -> Dict[str, bool]:
+        """Clear DTCs from all ECUs defined in YAML.
+
+        Returns:
+            Dict mapping ECU name to success/failure
+        """
+        results = {}
+
+        for ecu in self.ecus:
+            if not ecu.supports_dtc:
+                continue
+            try:
+                success = self.protocol.clear_dtcs(ecu_id=ecu.id)
+                results[ecu.name] = success
+                self._record_event("dtc_clear", f"{ecu.name}: {'OK' if success else 'FAIL'}")
+                self.logger.info(f"Clear DTC {ecu.name}: {'success' if success else 'failed'}")
+            except Exception as e:
+                results[ecu.name] = False
+                self.logger.debug(f"Failed to clear {ecu.name} DTCs: {e}")
+
+        return results
+
+    def read_dtcs(self) -> List[str]:
+        """Read DTCs from all ECUs defined in YAML.
+
+        Returns:
+            List of DTC codes from all accessible ECUs
+        """
+        all_dtcs = []
+
+        for ecu in self.ecus:
+            if not ecu.supports_dtc:
+                continue
+            try:
+                dtcs = self.protocol.read_dtcs(ecu_id=ecu.id)
+                if dtcs:
+                    # Prefix with ECU name for clarity
+                    prefixed = [f"{ecu.name}:{code}" for code in dtcs]
+                    all_dtcs.extend(prefixed)
+                    self._record_event("dtc", f"{ecu.name} DTCs: {dtcs}")
+                else:
+                    self._record_event("dtc", f"{ecu.name}: No DTCs")
+            except Exception as e:
+                self.logger.debug(f"Failed to read {ecu.name} DTCs: {e}")
+
+        return all_dtcs
 
     def debug_log(self) -> List[str]:
         """Return recent debug log entries."""

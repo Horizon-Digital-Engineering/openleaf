@@ -33,6 +33,11 @@ class ApiClient:
         response.raise_for_status()
         return response.json().get("status") == "ok"
 
+    async def read_dtcs(self) -> list[str]:
+        response = await self._client.get("/dtcs")
+        response.raise_for_status()
+        return response.json().get("dtcs", [])
+
     async def polling_loop(
         self, callback: StateCallback, interval: float = 0.5
     ) -> None:

@@ -27,6 +27,54 @@ metadata:
     access: "Direct OBD-II (pins 12/13)"
 
 # ==============================================================================
+# ECU DEFINITIONS (For DTC queries and diagnostics)
+# ==============================================================================
+# These are the ECUs accessible via the OBD2 port on AZE0 generation.
+# Request ID is what we send to, Response ID is what we listen for.
+# Some ECUs may not respond on all vehicles (depends on trim level).
+ecus:
+  - id: 0x79B
+    response_id: 0x7BB
+    name: "LBC"
+    description: "Lithium Battery Controller"
+    supports_dtc: true
+  - id: 0x797
+    response_id: 0x7B7
+    name: "VCM"
+    description: "Vehicle Control Module"
+    supports_dtc: true
+  - id: 0x743
+    response_id: 0x763
+    name: "ABS"
+    description: "Anti-lock Braking System"
+    supports_dtc: true
+  - id: 0x747
+    response_id: 0x767
+    name: "EPS"
+    description: "Electric Power Steering"
+    supports_dtc: true
+  - id: 0x765
+    response_id: 0x785
+    name: "BCM"
+    description: "Body Control Module"
+    supports_dtc: true
+  - id: 0x784
+    response_id: 0x7A4
+    name: "HVAC"
+    description: "Climate Control"
+    supports_dtc: true
+  - id: 0x793
+    response_id: 0x7B3
+    name: "OBC"
+    description: "On-Board Charger"
+    supports_dtc: true
+  - id: 0x79A
+    response_id: 0x7BA
+    name: "PDM"
+    description: "Power Delivery Module"
+    supports_dtc: true
+
+# ==============================================================================
 # BROADCAST FRAMES (Passive Monitoring - No Polling Required)
 # ==============================================================================
 broadcast_frames:
