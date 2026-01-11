@@ -257,3 +257,190 @@ YAML Definitions (pids/leaf_*.yaml)
 ```
 
 **No hardcoded byte offsets in transport code** - all decoding driven by YAML.
+
+---
+
+## Session: 2026-01-11 - Full UI Working
+
+### Goal
+Get the full stack running with live data displayed in the Kivy UI.
+
+---
+
+## Issue 8: Server Won't Start
+
+**Symptom**: `./start.sh all` runs but server log is empty, UI shows no data.
+
+**Root Cause**: `openleaf/server.py` had no `main()` entry point or `if __name__ == "__main__"` block. Running `python -m openleaf.server` did nothing.
+
+**Fix** in [openleaf/server.py](../openleaf/server.py):
+```python
+def main() -> None:
+    import argparse
+    import uvicorn
+
+    parser = argparse.ArgumentParser(description="OpenLeaf State Server")
+    parser.add_argument("--config", "-c", required=True, help="Path to YAML config file")
+    parser.add_argument("--host", default="127.0.0.1", help="Host to bind to")
+    parser.add_argument("--port", type=int, default=8000, help="Port to bind to")
+    args = parser.parse_args()
+
+    config = load_config(args.config)
+    server = LeafStateServer(config)
+    server.start_background_loop()
+    uvicorn.run(server.app, host=args.host, port=args.port, log_level="info")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+## Issue 9: UI Crash on Debug Log
+
+**Symptom**: UI crashes with `AttributeError: 'str' object has no attribute 'get'`
+
+**Root Cause**: Debug log entries changed from dicts `{"ts": ..., "direction": ..., "data": ...}` to strings `"[4.08] pid: Battery Health Data: {'battery_hx': 60.95}"`.
+
+**Fix** in [openleaf/ui/kivy/main.py](../openleaf/ui/kivy/main.py):
+```python
+def _update_debug_view(self, screen_manager, log: list) -> None:
+    for entry in reversed(log):
+        # Handle both string entries and dict entries
+        if isinstance(entry, str):
+            line = entry
+        else:
+            ts = entry.get("ts", 0.0)
+            # ... dict handling
+```
+
+---
+
+## Issue 10: SOC Always Shows 0%
+
+**Symptom**: SOH shows 44%, but SOC shows 0%.
+
+**Root Cause**: The SOC signals (`soc_display` from 0x1DB, `soc_precise` from 0x55B) are on **EV-CAN**, not **Car-CAN**. The OBD2 port only exposes Car-CAN.
+
+**Key Discovery**:
+- OBD2 port = Car-CAN only
+- 0x1DB (pack voltage, current, SOC) = EV-CAN only
+- 0x55B (precise SOC) = EV-CAN only
+- 0x5B3 (SOH, GIDs) = Car-CAN (accessible)
+- 0x5A9 (range) = Car-CAN (accessible)
+
+**Workaround**: Calculate SOC from GIDs using the formula:
+```python
+# Max GIDs for 24kWh pack = 281 (new), adjusted by SOH
+max_gids = 281 * (soh / 100.0)
+soc = (gids / max_gids) * 100.0
+```
+
+**Fix** in [openleaf/transports/obd2_unified.py](../openleaf/transports/obd2_unified.py):
+```python
+def _calculate_derived_values(self, state: Dict[str, Any]) -> None:
+    # ... existing code ...
+
+    # Calculate SOC from GIDs if not available from broadcast
+    if state.get("gids") and not state.get("soc_display"):
+        gids = state["gids"]
+        soh = state.get("soh_alt") or state.get("soh") or 100.0
+        max_gids_new = 281
+        max_gids = max_gids_new * (soh / 100.0)
+        if max_gids > 0:
+            soc = min(100.0, (gids / max_gids) * 100.0)
+            state["soc_display"] = round(soc, 1)
+```
+
+**Result**: SOC now shows ~70% (86 GIDs ÷ 124 max GIDs at 44% SOH).
+
+---
+
+## Issue 11: Range Shows Wrong Value
+
+**Symptom**: Range showing 104.2 km but car dash shows 37 miles (59.5 km).
+
+**Root Cause**: YAML had wrong `start_bit: 3` for range signal. DBC file shows correct extraction method.
+
+**Investigation**: Found in DBC reference:
+```
+RangeInstrumentCluster : 15|12@0+ (0.2,0) [0|819] "km"
+OVMS formula: nl_range = d[1] << 4 | d[2] >> 4; m_range_instrument->SetValue(nl_range / 5, Kilometers);
+```
+
+**Fix** in [pids/leaf_aze0.yaml](../pids/leaf_aze0.yaml):
+```yaml
+- key: "range_km"
+  start_bit: 8
+  length: 12
+  scale: 0.2
+  unit: "km"
+  formula: "(data[1] << 4) | (data[2] >> 4)"
+```
+
+Also updated [elm327.py](../openleaf/transports/elm327.py) to pass `data` to formula eval:
+```python
+if signal.formula:
+    value = eval(signal.formula, {"value": value, "data": data})
+```
+
+**Result**: Range now shows 60 km = 37.3 miles (matches dash).
+
+---
+
+## Issue 12: Cell Graph Missing Cells
+
+**Symptom**: Some cells at minimum voltage are invisible (bar height = 0).
+
+**Root Cause**: Bar height calculated as `(value - min) / span * height`, so minimum cell gets height 0.
+
+**Fix** in [openleaf/ui/kivy/widgets/cell_graph.py](../openleaf/ui/kivy/widgets/cell_graph.py):
+```python
+# Add 15% padding below min so lowest cells are still visible
+padding_v = span * 0.15
+display_min = min_v - padding_v
+display_span = (max_v - display_min)
+
+# Minimum bar height so lowest cell is visible
+min_bar_height = dp(6)
+for index, value in enumerate(self.values):
+    norm = (value - display_min) / display_span
+    bar_height = max(graph_height * norm, min_bar_height)
+```
+
+Also added Y-axis voltage labels and X-axis cell numbers (every 12 cells).
+
+---
+
+## Final Results (Session 3)
+
+**Full UI Working with Live Data**:
+
+| Metric | Value | Source |
+|--------|-------|--------|
+| SOC | ~70% | Calculated from GIDs |
+| SOH | 44% | Broadcast 0x5B3 |
+| GIDs | 86 | Broadcast 0x5B3 |
+| HX | 60.9% | UDS Group 1 |
+| Cell Voltages | 96 cells | UDS Group 2 |
+| Cell Delta | 21mV | Calculated |
+| Pack Temp | 22.3°C | UDS Group 4 |
+| Range | 60 km / 37 mi | Broadcast 0x5A9 |
+| Balancing | Active | UDS Group 6 |
+
+**UI Features**:
+- Dashboard with SOC/SOH gauges
+- GIDs, HX, Range metrics
+- Cell voltage graph with Y-axis labels and X-axis cell numbers
+- Debug log viewer
+
+---
+
+## Key Learnings (Session 3)
+
+1. **EV-CAN vs Car-CAN** - OBD2 port only exposes Car-CAN. Pack voltage/current (0x1DB) and precise SOC (0x55B) are on EV-CAN and not accessible.
+2. **SOC can be calculated from GIDs** - Formula: `soc = gids / (281 * soh/100) * 100`
+3. **DBC files are the source of truth** - OVMS formulas in DBC comments are reliable
+4. **Always add entry points** - Python modules need `if __name__ == "__main__"` to be runnable
+5. **Handle data format changes** - Debug logs changed from dicts to strings, broke UI
