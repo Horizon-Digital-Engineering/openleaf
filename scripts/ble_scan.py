@@ -14,14 +14,14 @@ except ModuleNotFoundError:
 
 
 async def scan(timeout: float, name_filter: Optional[str]) -> None:
-    devices = await BleakScanner.discover(timeout=timeout)
-    for device in devices:
-        name = device.name or "(no name)"
+    devices = await BleakScanner.discover(timeout=timeout, return_adv=True)
+    for address, (device, adv_data) in devices.items():
+        name = device.name or adv_data.local_name or "(no name)"
         if name_filter and name_filter.lower() not in name.lower():
             continue
-        rssi = getattr(device, "rssi", None) or getattr(device.details, "rssi", None)
+        rssi = adv_data.rssi
         rssi_str = f"{rssi}" if rssi is not None else "n/a"
-        print(f"{device.address:17}  {name:25}  RSSI={rssi_str}")
+        print(f"{device.address:40}  {name:25}  RSSI={rssi_str}")
 
 
 async def inspect(address: str) -> None:

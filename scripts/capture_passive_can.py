@@ -37,10 +37,13 @@ except ImportError:
 class SerialCANMonitor:
     """Monitor CAN bus via serial ELM327 adapter."""
 
-    def __init__(self, port: str, baudrate: int = 115200, timeout: float = 0.1):
+    def __init__(self, port: str, baudrate: int = 115200, timeout: float = 2.0,
+                 use_filters: bool = False, can_filter: Optional[str] = None):
         self.port = port
         self.baudrate = baudrate
         self.timeout = timeout
+        self.use_filters = use_filters
+        self.can_filter = can_filter
         self._serial: Optional[serial.Serial] = None
 
     def connect(self) -> None:
@@ -49,22 +52,80 @@ class SerialCANMonitor:
             raise ImportError("pyserial is required. Install: pip install pyserial")
 
         print(f"Opening {self.port} @ {self.baudrate}...")
-        self._serial = serial.Serial(self.port, baudrate=self.baudrate, timeout=self.timeout)
+        self._serial = serial.Serial(self.port, baudrate=self.baudrate, timeout=1.0)
+
+        # Verify we can communicate with the adapter
+        print("Testing connection...")
+        self._serial.write(b'ATI\r')
         time.sleep(0.5)
 
-        # Initialize ELM327
-        init_commands = ["ATZ", "ATI", "ATL1", "ATH1", "ATS1", "ATAL", "ATSP6"]
-        for cmd in init_commands:
-            self._write(cmd)
-            response = self._read_until_prompt()
-            print(f"  {cmd} -> {response[:50]}...")
+        test_response = b''
+        if self._serial.in_waiting > 0:
+            test_response = self._serial.read(self._serial.in_waiting)
+            print(f"Test response: {test_response}")
+        else:
+            raise RuntimeError(f"No response from adapter at {self.port}. Check connection and ensure device is powered on.")
 
-    def start_monitoring(self) -> None:
-        """Put ELM327 into monitor-all mode."""
-        print("\nStarting passive CAN monitoring (ATMA)...")
-        self._write("ATMA")
-        # Don't wait for prompt - we're in streaming mode now
+        # Verify we got something back
+        if len(test_response) == 0:
+            raise RuntimeError(f"Adapter at {self.port} is not responding. Check that it's properly connected.")
+
+        print(f"Connection verified! Adapter responded: {test_response.decode('ascii', errors='ignore').strip()}")
         time.sleep(0.2)
+
+        # Initialize ELM327 for passive monitoring (same as BLE)
+        init_commands = [
+            ("ATZ", 2.0),     # Reset - needs longer delay
+            ("ATI", 0.5),     # Identify
+            ("ATL1", 0.5),    # Linefeeds ON (easier to parse)
+            ("ATH1", 0.5),    # Headers ON (needed to see CAN IDs)
+            ("ATS1", 0.5),    # Spaces ON (easier to parse)
+            ("ATAL", 0.5),    # Allow long messages (ISO-TP multi-frame)
+            ("ATSP6", 0.5),   # Set protocol to ISO 15765-4 CAN (11 bit ID, 500 kbaud)
+        ]
+
+        # Add filter configuration if requested
+        if self.use_filters and self.can_filter:
+            # Only use filter if explicitly requested by user
+            init_commands.append((f"ATCRA {self.can_filter}", 0.5))
+            print(f"Using CAN filter: {self.can_filter}")
+        else:
+            # Default: NO filters - capture everything (that's the point!)
+            print("No filters - capturing ALL CAN traffic")
+
+        for cmd, delay in init_commands:
+            self._write(cmd)
+            time.sleep(delay)  # Wait for command to complete
+            response = self._read_until_prompt()
+            print(f"  {cmd} -> {response}")
+            # Check for errors
+            if "?" in response or "ERROR" in response:
+                print(f"    WARNING: Command may have failed!")
+
+    def start_monitoring(self, use_atma: bool = True) -> None:
+        """Put ELM327 into monitor mode.
+
+        Args:
+            use_atma: If True, use ATMA (monitor all). If False, use ATMR (filtered).
+        """
+        if use_atma:
+            print("\nStarting passive CAN monitoring (ATMA)...")
+            self._write("ATMA")
+        else:
+            print("\nStarting filtered CAN monitoring (ATMR)...")
+            self._write("ATMR")
+
+        # Give adapter time to enter monitor mode before we start reading
+        time.sleep(0.5)
+
+        # Check if command was rejected
+        if self._serial and self._serial.in_waiting > 0:
+            response = self._serial.read(self._serial.in_waiting).decode('ascii', errors='ignore')
+            print(f"ATMA response: {response}")
+            if "?" in response or "ERROR" in response:
+                print("ERROR: ATMA command not supported or failed!")
+        else:
+            print("No immediate response from ATMA (this is normal - it starts streaming)")
 
     def read_frames(self) -> list[str]:
         """Read available CAN frames from buffer."""
@@ -74,7 +135,8 @@ class SerialCANMonitor:
         frames = []
         while self._serial.in_waiting > 0:
             line = self._serial.readline().decode('ascii', errors='ignore').strip()
-            if line and line != '>' and not line.startswith('AT'):
+            # Filter out prompts, empty lines, and command echoes
+            if line and line != '>' and not line.startswith('AT') and not line.startswith('ELM'):
                 frames.append(line)
         return frames
 
@@ -98,18 +160,31 @@ class SerialCANMonitor:
             self._serial.write((command + '\r').encode('ascii'))
 
     def _read_until_prompt(self) -> str:
-        """Read until '>' prompt."""
+        """Read until '>' prompt or timeout."""
         if not self._serial:
             return ""
+
         result = []
-        while True:
-            line = self._serial.readline().decode('ascii', errors='ignore').strip()
-            if not line:
-                break
-            if line == '>':
-                break
-            result.append(line)
-        return ' '.join(result)
+        start_time = time.time()
+        timeout = 3.0  # 3 second timeout for response
+
+        while (time.time() - start_time) < timeout:
+            if self._serial.in_waiting > 0:
+                # Read one byte at a time to catch the prompt
+                char = self._serial.read(1).decode('ascii', errors='ignore')
+                if char == '>':
+                    break
+                elif char == '\r':
+                    continue  # Skip carriage returns
+                elif char == '\n':
+                    continue  # Skip linefeeds
+                elif char.isprintable() or char == ' ':
+                    result.append(char)
+            else:
+                # No data waiting, sleep briefly
+                time.sleep(0.01)
+
+        return ''.join(result).strip()
 
 
 class BleCANMonitor:
@@ -118,7 +193,9 @@ class BleCANMonitor:
     def __init__(self, address: str,
                  service_uuid: str = "0000ffe0-0000-1000-8000-00805f9b34fb",
                  write_uuid: str = "0000ffe1-0000-1000-8000-00805f9b34fb",
-                 notify_uuid: str = "0000ffe1-0000-1000-8000-00805f9b34fb"):
+                 notify_uuid: str = "0000ffe1-0000-1000-8000-00805f9b34fb",
+                 use_filters: bool = False,
+                 can_filter: Optional[str] = None):
         if BleakClient is None:
             raise ImportError("bleak is required for BLE. Install: pip install bleak")
 
@@ -126,6 +203,8 @@ class BleCANMonitor:
         self.service_uuid = service_uuid
         self.write_uuid = write_uuid
         self.notify_uuid = notify_uuid
+        self.use_filters = use_filters
+        self.can_filter = can_filter
         self._client: Optional[BleakClient] = None
         self._rx_buffer = ""
         self._frame_queue: list[str] = []
@@ -139,18 +218,46 @@ class BleCANMonitor:
         # Start notifications
         await self._client.start_notify(self.notify_uuid, self._on_notify)
 
-        print("Initializing ELM327...")
-        init_commands = ["ATZ", "ATI", "ATL1", "ATH1", "ATS1", "ATAL", "ATSP6"]
+        print("Initializing ELM327 with optimized settings...")
+        # Optimized settings: ATL0 and ATS0 reduce buffer usage
+        init_commands = [
+            "ATZ",     # Reset
+            "ATI",     # Identify
+            "ATL0",    # Linefeeds OFF (reduces buffer usage)
+            "ATH1",    # Headers ON (needed to see CAN IDs)
+            "ATS0",    # Spaces OFF (reduces buffer usage)
+            "ATAL",    # Allow long messages (ISO-TP multi-frame)
+            "ATSP6",   # Set protocol to ISO 15765-4 CAN (11 bit ID, 500 kbaud)
+        ]
+
+        # Add filter configuration if requested
+        if self.use_filters and self.can_filter:
+            # Only use filter if explicitly requested by user
+            init_commands.append(f"ATCRA {self.can_filter}")
+            print(f"Using CAN filter: {self.can_filter}")
+        else:
+            # Default: NO filters - capture everything (that's the point!)
+            # Optimized settings (ATL0, ATS0) help reduce buffer usage
+            print("No filters - capturing ALL CAN traffic (ATL0/ATS0 reduce buffer load)")
+
         for cmd in init_commands:
             await self._write(cmd)
             await asyncio.sleep(0.3)
             response = self._drain_queue()
             print(f"  {cmd} -> {response[:50]}...")
 
-    async def start_monitoring(self) -> None:
-        """Put ELM327 into monitor-all mode."""
-        print("\nStarting passive CAN monitoring (ATMA)...")
-        await self._write("ATMA")
+    async def start_monitoring(self, use_atma: bool = True) -> None:
+        """Put ELM327 into monitor mode.
+
+        Args:
+            use_atma: If True, use ATMA (monitor all). If False, use ATMR (filtered).
+        """
+        if use_atma:
+            print("\nStarting passive CAN monitoring (ATMA)...")
+            await self._write("ATMA")
+        else:
+            print("\nStarting filtered CAN monitoring (ATMR)...")
+            await self._write("ATMR")  # Monitor receive - respects CAN filters
         await asyncio.sleep(0.2)
 
     def read_frames(self) -> list[str]:
@@ -203,13 +310,17 @@ class BleCANMonitor:
 
 async def capture_ble(args) -> None:
     """Capture CAN frames via BLE adapter."""
-    monitor = BleCANMonitor(args.ble)
+    monitor = BleCANMonitor(
+        args.ble,
+        use_filters=bool(args.can_filter),
+        can_filter=args.can_filter
+    )
     log_path = Path(args.output) / f"passive_ble_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
         await monitor.connect()
-        await monitor.start_monitoring()
+        await monitor.start_monitoring(use_atma=not args.use_atmr)
 
         print(f"\nCapturing CAN frames for {args.duration} seconds...")
         print(f"Writing to: {log_path}")
@@ -217,10 +328,14 @@ async def capture_ble(args) -> None:
 
         start_time = time.time()
         frame_count = 0
+        error_count = 0
+        buffer_full_count = 0
 
         with open(log_path, 'w', encoding='utf-8') as log_file:
             log_file.write(f"# Passive Car-CAN capture via BLE\n")
             log_file.write(f"# Device: {args.ble}\n")
+            log_file.write(f"# Filters: {args.can_filter if args.can_filter else 'NONE (capturing all traffic)'}\n")
+            log_file.write(f"# Mode: {'ATMR (filtered)' if args.use_atmr else 'ATMA (monitor all)'}\n")
             log_file.write(f"# Started: {datetime.now().isoformat()}\n")
             log_file.write(f"# Format: <timestamp> <can_id> <data_bytes>\n\n")
 
@@ -233,9 +348,21 @@ async def capture_ble(args) -> None:
                     log_file.flush()
                     frame_count += 1
 
-                    if frame_count % 100 == 0:
+                    # Print to console if enabled
+                    if args.print_frames:
+                        print(f"{timestamp:.6f} {frame}")
+
+                    # Track errors
+                    if "DATA ERROR" in frame or "<DATA" in frame:
+                        error_count += 1
+                    if "BUFFER FULL" in frame:
+                        buffer_full_count += 1
+                        print(f"WARNING: Buffer overflow detected at {frame_count} frames!")
+
+                    if frame_count % 100 == 0 and not args.print_frames:
                         elapsed = time.time() - start_time
-                        print(f"Captured {frame_count} frames in {elapsed:.1f}s ({frame_count/elapsed:.1f} fps)")
+                        print(f"Captured {frame_count} frames ({error_count} errors, {buffer_full_count} overflows) "
+                              f"in {elapsed:.1f}s ({frame_count/elapsed:.1f} fps)")
 
                 await asyncio.sleep(0.01)  # Small delay to prevent busy loop
 
@@ -246,19 +373,27 @@ async def capture_ble(args) -> None:
     finally:
         await monitor.close()
 
-    print(f"\nCaptured {frame_count} frames total")
+    print("\n=== Capture Summary ===")
+    print(f"Total frames: {frame_count}")
+    print(f"Data errors: {error_count}")
+    print(f"Buffer overflows: {buffer_full_count}")
+    print(f"Success rate: {((frame_count - error_count) / frame_count * 100) if frame_count > 0 else 0:.1f}%")
     print(f"Log saved to: {log_path}")
 
 
 def capture_serial(args) -> None:
     """Capture CAN frames via serial adapter."""
-    monitor = SerialCANMonitor(args.port)
+    monitor = SerialCANMonitor(
+        args.port,
+        use_filters=bool(args.can_filter),
+        can_filter=args.can_filter
+    )
     log_path = Path(args.output) / f"passive_serial_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
         monitor.connect()
-        monitor.start_monitoring()
+        monitor.start_monitoring(use_atma=not args.use_atmr)
 
         print(f"\nCapturing CAN frames for {args.duration} seconds...")
         print(f"Writing to: {log_path}")
@@ -266,15 +401,33 @@ def capture_serial(args) -> None:
 
         start_time = time.time()
         frame_count = 0
+        error_count = 0
+        buffer_full_count = 0
 
         with open(log_path, 'w', encoding='utf-8') as log_file:
-            log_file.write(f"# Passive Car-CAN capture via Serial\n")
+            log_file.write("# Passive Car-CAN capture via Serial\n")
             log_file.write(f"# Port: {args.port}\n")
+            log_file.write(f"# Filters: {args.can_filter if args.can_filter else 'NONE (capturing all traffic)'}\n")
+            log_file.write(f"# Mode: {'ATMR (filtered)' if args.use_atmr else 'ATMA (monitor all)'}\n")
             log_file.write(f"# Started: {datetime.now().isoformat()}\n")
-            log_file.write(f"# Format: <timestamp> <can_id> <data_bytes>\n\n")
+            log_file.write("# Format: <timestamp> <can_id> <data_bytes>\n\n")
 
+            last_debug = 0
             while time.time() - start_time < args.duration:
                 frames = monitor.read_frames()
+
+                # Debug: print raw buffer status every 5 seconds if no frames
+                current_time = time.time() - start_time
+                if frame_count == 0 and current_time - last_debug >= 5:
+                    if monitor._serial:
+                        waiting = monitor._serial.in_waiting
+                        print(f"DEBUG: {waiting} bytes in buffer, {frame_count} frames captured so far")
+                        if waiting > 0:
+                            # Read a bit to see what's there
+                            peek = monitor._serial.read(min(100, waiting))
+                            print(f"DEBUG: Buffer peek: {peek}")
+                            # Don't consume it - we'll let read_frames handle it
+                    last_debug = current_time
 
                 for frame in frames:
                     timestamp = time.time()
@@ -282,9 +435,21 @@ def capture_serial(args) -> None:
                     log_file.flush()
                     frame_count += 1
 
-                    if frame_count % 100 == 0:
+                    # Print to console if enabled
+                    if args.print_frames:
+                        print(f"{timestamp:.6f} {frame}")
+
+                    # Track errors
+                    if "DATA ERROR" in frame or "<DATA" in frame:
+                        error_count += 1
+                    if "BUFFER FULL" in frame:
+                        buffer_full_count += 1
+                        print(f"WARNING: Buffer overflow detected at {frame_count} frames!")
+
+                    if frame_count % 100 == 0 and not args.print_frames:
                         elapsed = time.time() - start_time
-                        print(f"Captured {frame_count} frames in {elapsed:.1f}s ({frame_count/elapsed:.1f} fps)")
+                        print(f"Captured {frame_count} frames ({error_count} errors, {buffer_full_count} overflows) "
+                              f"in {elapsed:.1f}s ({frame_count/elapsed:.1f} fps)")
 
                 time.sleep(0.01)
 
@@ -295,7 +460,11 @@ def capture_serial(args) -> None:
     finally:
         monitor.close()
 
-    print(f"\nCaptured {frame_count} frames total")
+    print("\n=== Capture Summary ===")
+    print(f"Total frames: {frame_count}")
+    print(f"Data errors: {error_count}")
+    print(f"Buffer overflows: {buffer_full_count}")
+    print(f"Success rate: {((frame_count - error_count) / frame_count * 100) if frame_count > 0 else 0:.1f}%")
     print(f"Log saved to: {log_path}")
 
 
@@ -382,17 +551,22 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Scan for BLE adapters and choose one
+  # Scan for BLE adapter and capture ALL traffic (default - no filters)
   python scripts/capture_passive_can.py --scan --duration 60
 
-  # Capture via serial Bluetooth adapter for 60 seconds
-  python scripts/capture_passive_can.py --port /dev/rfcomm0 --duration 60
+  # Bluetooth Classic (OBDLink MX+, etc) - pair first, then find port:
+  #   macOS: ls /dev/cu.*
+  #   Linux: ls /dev/rfcomm*
+  python scripts/capture_passive_can.py --port /dev/cu.OBDLINK-SPP --duration 60
 
-  # Capture via BLE adapter for 2 minutes
-  python scripts/capture_passive_can.py --ble AA:BB:CC:DD:EE:FF --duration 120
+  # Capture with custom CAN filter (only messages with ID 0x1DB)
+  python scripts/capture_passive_can.py --ble AA:BB:CC:DD:EE:FF --filter 1DB
+
+  # Use ATMR (filtered monitoring) for better compatibility
+  python scripts/capture_passive_can.py --scan --duration 60 --use-atmr
 
   # Capture to custom output directory
-  python scripts/capture_passive_can.py --port /dev/rfcomm0 --output ./my_logs
+  python scripts/capture_passive_can.py --port /dev/cu.OBDLINK-SPP --output ./my_logs
 """
     )
 
@@ -408,6 +582,19 @@ Examples:
                        help='Capture duration in seconds (default: 60)')
     parser.add_argument('--output', default='./logs',
                        help='Output directory for log files (default: ./logs)')
+
+    # Filter options
+    parser.add_argument('--filter', dest='can_filter', type=str, default=None,
+                       help='ONLY use a filter for specific CAN ID (hex, e.g., 1DB). Default: NO filters (capture everything)')
+    parser.add_argument('--use-atmr', action='store_true',
+                       help='Use ATMR (filtered monitoring) instead of ATMA (monitor all)')
+
+    # Output options
+    parser.add_argument('--print', dest='print_frames', action='store_true',
+                       help='Print frames to console in real-time (in addition to log file)')
+
+    # Set defaults
+    parser.set_defaults(use_filters=False, print_frames=True)
 
     args = parser.parse_args()
 
