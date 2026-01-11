@@ -7,7 +7,7 @@ transport:
   ble_notify_char_uuid: "0000ffe1-0000-1000-8000-00805f9b34fb"
   timeout_sec: 1.0
   update_interval_sec: 1.0
-  pid_path: "pids/leaf.yaml"
+  pid_path: "pids/leaf_ze1.yaml"
   reconnect_delay_sec: 5.0
 
 logging:

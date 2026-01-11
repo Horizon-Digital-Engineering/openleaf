@@ -124,26 +124,53 @@ class OBD2Transport(Transport):
         with open(self.pid_path, "r") as f:
             data = yaml.safe_load(f)
 
+        # Support both old "pids" and new "query_pids" keys
+        pid_list = data.get("query_pids", data.get("pids", []))
+
         pids = []
-        for pid_data in data.get("pids", []):
+        for pid_data in pid_list:
             signals = []
             for signal_data in pid_data.get("signals", []):
+                # Handle both start_bit and byte_offset formats
+                if "start_bit" in signal_data:
+                    start_bit = signal_data["start_bit"]
+                    length = signal_data["length"]
+                elif "byte_offset" in signal_data:
+                    # Convert byte offset to bit offset
+                    start_bit = signal_data["byte_offset"] * 8
+                    length = signal_data.get("byte_length", 1) * 8
+                else:
+                    self.logger.warning(f"Signal {signal_data.get('key')} missing offset info, skipping")
+                    continue
+
                 signal = PidSignal(
                     key=signal_data["key"],
-                    start_bit=signal_data["start_bit"],
-                    length=signal_data["length"],
+                    start_bit=start_bit,
+                    length=length,
                     scale=signal_data.get("scale", 1.0),
                     offset=signal_data.get("offset", 0.0),
                     enum=signal_data.get("enum"),
                 )
                 signals.append(signal)
 
+            # Parse request_id/response_id (handle hex strings with or without 0x prefix)
+            request_id_str = str(pid_data["request_id"])
+            response_id_str = str(pid_data["response_id"])
+            service_str = str(pid_data["service"])
+            data_id_str = str(pid_data["data_identifier"])
+
+            # Remove 0x prefix if present, then parse as hex
+            request_id = int(request_id_str.replace("0x", "").replace("0X", ""), 16)
+            response_id = int(response_id_str.replace("0x", "").replace("0X", ""), 16)
+            service = int(service_str.replace("0x", "").replace("0X", ""), 16)
+            data_identifier = int(data_id_str.replace("0x", "").replace("0X", ""), 16)
+
             pid = PidDefinition(
                 name=pid_data["name"],
-                request_id=int(pid_data["request_id"], 16),
-                response_id=int(pid_data["response_id"], 16),
-                service=int(pid_data["service"], 16),
-                data_identifier=int(pid_data["data_identifier"], 16),
+                request_id=request_id,
+                response_id=response_id,
+                service=service,
+                data_identifier=data_identifier,
                 signals=signals,
                 poll_interval_sec=pid_data.get("poll_interval_sec"),
             )

@@ -1,0 +1,383 @@
+# Nissan Leaf AZE0 Generation (2013-2017)
+# Compatible Years: 2013, 2014, 2015, 2016, 2017
+# Battery Capacities: 24 kWh (2013-2015), 30 kWh (2016-2017 "Lizard")
+# Chemistry: AESC LMO (24kWh) or LG Chem NCM (30kWh)
+# Cell Configuration: Always 96s2p (96 cell pairs, 192 total cells)
+# CAN Access: Direct via OBD-II pins 12/13 (no gateway blocking)
+
+metadata:
+  generation: "AZE0"
+  years: [2013, 2014, 2015, 2016, 2017]
+  battery_capacities:
+    - capacity_kwh: 24
+      chemistry: "AESC LMO"
+      max_gids: 281
+      years: [2013, 2014, 2015]
+    - capacity_kwh: 24
+      chemistry: "AESC LMO Lizard"
+      max_gids: 281
+      years: [2015, 2016, 2017]
+    - capacity_kwh: 30
+      chemistry: "LG Chem NCM"
+      max_gids: 356
+      years: [2016, 2017]
+  can_bus:
+    type: "Car-CAN"
+    baud_rate: 500000
+    access: "Direct OBD-II (pins 12/13)"
+
+# ==============================================================================
+# BROADCAST FRAMES (Passive Monitoring - No Polling Required)
+# ==============================================================================
+broadcast_frames:
+  # Battery pack voltage, current, and usable SOC
+  - id: 0x1DB
+    name: "Battery Voltage & Current"
+    bus: "Car-CAN"
+    interval_ms: 100  # 10 Hz
+    length: 8
+    signals:
+      - key: "pack_current"
+        start_bit: 0
+        length: 11
+        signed: true
+        scale: 0.5
+        unit: "A"
+        description: "Battery current (negative=charging, positive=discharging)"
+      - key: "pack_voltage"
+        start_bit: 16
+        length: 10
+        scale: 0.5
+        unit: "V"
+        description: "Total pack voltage"
+      - key: "soc_display"
+        start_bit: 32
+        length: 7
+        scale: 1.0
+        unit: "%"
+        description: "Usable state of charge shown on dash"
+
+  # Battery capacity, temperature, and health
+  - id: 0x5BC
+    name: "Battery Capacity & Temperature"
+    bus: "Car-CAN"
+    interval_ms: 100  # 10 Hz (changed from 500ms in ZE0!)
+    length: 8
+    signals:
+      - key: "gids"
+        start_bit: 0
+        length: 10
+        scale: 1.0
+        unit: "GIDs"
+        description: "Remaining capacity in 80Wh increments"
+      - key: "charge_bars"
+        start_bit: 20
+        length: 4
+        scale: 1.0
+        unit: "bars"
+        description: "Battery capacity bars (0-12)"
+      - key: "pack_temp_avg"
+        start_bit: 24
+        length: 8
+        scale: 1.0
+        offset: -40.0
+        unit: "C"
+        description: "Average battery pack temperature"
+      - key: "soh"
+        start_bit: 33
+        length: 7
+        scale: 1.0
+        unit: "%"
+        description: "State of health (capacity deterioration rate)"
+
+  # State of Health (alternative source on CAR-CAN)
+  - id: 0x5B3
+    name: "State of Health"
+    bus: "Car-CAN"
+    interval_ms: 500  # 2 Hz
+    length: 8
+    signals:
+      - key: "soh_alt"
+        byte_offset: 1
+        byte_length: 1
+        formula: "value >> 1"
+        unit: "%"
+        description: "SOH from byte shift method"
+      - key: "stored_energy_gids"
+        byte_offset: 5
+        byte_length: 1
+        scale: 1.0
+        unit: "GIDs"
+        description: "Stored energy (multiply by 80 for Wh)"
+
+  # Detailed SOC (10-bit precision)
+  - id: 0x55B
+    name: "Battery SOC Detailed"
+    bus: "Car-CAN"
+    interval_ms: 100  # 10 Hz
+    length: 8
+    signals:
+      - key: "soc_precise"
+        start_bit: 0
+        length: 10
+        scale: 0.1
+        unit: "%"
+        description: "Precise state of charge (0.1% resolution)"
+
+  # Range and battery warnings
+  - id: 0x5A9
+    name: "Range & Warnings"
+    bus: "Car-CAN"
+    interval_ms: 100  # 10 Hz
+    length: 8
+    signals:
+      - key: "range_km"
+        start_bit: 3
+        length: 12
+        scale: 0.2
+        unit: "km"
+        description: "Estimated range from instrument cluster"
+      - key: "low_battery_warning"
+        start_bit: 16
+        length: 1
+        scale: 1.0
+        unit: "flag"
+        description: "Low battery warning (0=off, 1=on)"
+      - key: "critical_battery_warning"
+        start_bit: 43
+        length: 1
+        scale: 1.0
+        unit: "flag"
+        description: "Critical battery warning"
+
+  # Motor/Inverter status
+  - id: 0x1DA
+    name: "Motor & Inverter"
+    bus: "Car-CAN"
+    interval_ms: 100  # 10 Hz
+    length: 8
+    signals:
+      - key: "motor_voltage"
+        start_bit: 0
+        length: 8
+        scale: 2.0
+        unit: "V"
+        description: "Motor input voltage"
+      - key: "motor_torque"
+        start_bit: 18
+        length: 11
+        signed: true
+        scale: 0.5
+        unit: "Nm"
+        description: "Motor effective torque"
+      - key: "motor_rpm"
+        start_bit: 39
+        length: 15
+        signed: true
+        scale: 1.0
+        unit: "rpm"
+        description: "Motor output RPM"
+
+  # Charger output power
+  - id: 0x380
+    name: "Charger Output"
+    bus: "Car-CAN"
+    interval_ms: 100  # 10 Hz
+    length: 8
+    signals:
+      - key: "charger_power"
+        start_bit: 16
+        length: 9
+        scale: 0.1
+        unit: "kW"
+        description: "Charger output power"
+      - key: "ac_voltage"
+        start_bit: 42
+        length: 9
+        scale: 0.5
+        offset: 70.0
+        unit: "V"
+        description: "AC input voltage to charger"
+
+  # J1772 / Quick Charge status
+  - id: 0x5BF
+    name: "J1772 / QC Status"
+    bus: "Car-CAN"
+    interval_ms: 100
+    length: 8
+    signals:
+      - key: "j1772_current_limit"
+        start_bit: 16
+        length: 8
+        scale: 0.5
+        unit: "A"
+        description: "J1772 pilot current limit"
+      - key: "qc_voltage"
+        start_bit: 24
+        length: 8
+        scale: 1.0
+        offset: 257.0
+        unit: "V"
+        description: "Quick charge voltage"
+
+  # Climate control / outside temp
+  - id: 0x54C
+    name: "Climate Control"
+    bus: "Car-CAN"
+    interval_ms: 100  # 10 Hz
+    length: 8
+    signals:
+      - key: "outside_temp"
+        start_bit: 48
+        length: 8
+        scale: 0.5
+        offset: -40.0
+        unit: "C"
+        description: "Outside ambient temperature"
+
+  # Inverter temperatures
+  - id: 0x55A
+    name: "Inverter Temperatures"
+    bus: "Car-CAN"
+    interval_ms: 100  # 10 Hz
+    length: 8
+    signals:
+      - key: "motor_temp"
+        start_bit: 32
+        length: 8
+        scale: 0.5
+        unit: "C"
+        description: "Motor temperature"
+      - key: "igbt_temp"
+        start_bit: 16
+        length: 8
+        scale: 0.5
+        unit: "C"
+        description: "IGBT (inverter) temperature"
+
+# ==============================================================================
+# ACTIVE QUERY PIDs (Diagnostic Requests via UDS Service 0x21)
+# ==============================================================================
+query_pids:
+  # Group 0x01 - Precision battery data
+  - name: "Battery Detailed Status"
+    request_id: 0x79B
+    response_id: 0x7BB
+    service: 0x21
+    data_identifier: 0x01
+    poll_interval_sec: 1.0
+    multi_frame: true
+    signals:
+      - key: "soc_true"
+        byte_offset: 0
+        byte_length: 2
+        scale: 0.01
+        unit: "%"
+        description: "True state of charge (high precision)"
+      - key: "ah_capacity"
+        byte_offset: 2
+        byte_length: 2
+        scale: 0.01
+        unit: "Ah"
+        description: "Current amp-hour capacity"
+      - key: "soh_precise"
+        byte_offset: 4
+        byte_length: 2
+        scale: 0.01
+        unit: "%"
+        description: "Precise state of health"
+
+  # Group 0x02 - All 96 cell voltages (48 pairs in 2S config)
+  - name: "Cell Voltages"
+    request_id: 0x79B
+    response_id: 0x7BB
+    service: 0x21
+    data_identifier: 0x02
+    poll_interval_sec: 5.0
+    multi_frame: true
+    continuation_required: true
+    signals:
+      - key: "cell_voltages"
+        byte_offset: 0
+        byte_length: 192  # 96 cells x 2 bytes each
+        encoding: "array_u16_be"
+        scale: 0.001
+        unit: "V"
+        description: "Array of all 96 cell pair voltages"
+
+  # Group 0x03 - Cell voltage statistics
+  - name: "Cell Voltage Stats"
+    request_id: 0x79B
+    response_id: 0x7BB
+    service: 0x21
+    data_identifier: 0x03
+    poll_interval_sec: 2.0
+    multi_frame: true
+    signals:
+      - key: "cell_v_min"
+        byte_offset: 0
+        byte_length: 2
+        scale: 0.001
+        unit: "V"
+        description: "Minimum cell voltage"
+      - key: "cell_v_max"
+        byte_offset: 2
+        byte_length: 2
+        scale: 0.001
+        unit: "V"
+        description: "Maximum cell voltage"
+      - key: "cell_v_delta"
+        byte_offset: 4
+        byte_length: 2
+        scale: 0.001
+        unit: "V"
+        description: "Cell voltage spread (max - min)"
+
+  # Group 0x04 - Temperature sensors (4 pack thermistors)
+  - name: "Pack Temperatures"
+    request_id: 0x79B
+    response_id: 0x7BB
+    service: 0x21
+    data_identifier: 0x04
+    poll_interval_sec: 2.0
+    multi_frame: true
+    signals:
+      - key: "temp_sensor_1"
+        byte_offset: 2
+        byte_length: 1
+        scale: 1.0
+        unit: "C"
+        description: "Battery temperature sensor 1"
+      - key: "temp_sensor_2"
+        byte_offset: 5
+        byte_length: 1
+        scale: 1.0
+        unit: "C"
+        description: "Battery temperature sensor 2"
+      - key: "temp_sensor_3"
+        byte_offset: 8
+        byte_length: 1
+        scale: 1.0
+        unit: "C"
+        description: "Battery temperature sensor 3"
+      - key: "temp_sensor_4"
+        byte_offset: 11
+        byte_length: 1
+        scale: 1.0
+        unit: "C"
+        description: "Battery temperature sensor 4"
+
+  # Group 0x06 - Cell balancing shunt status
+  - name: "Cell Balancing Status"
+    request_id: 0x79B
+    response_id: 0x7BB
+    service: 0x21
+    data_identifier: 0x06
+    poll_interval_sec: 10.0
+    multi_frame: true
+    signals:
+      - key: "balancing_bitmap"
+        byte_offset: 0
+        byte_length: 12  # 96 bits for 96 cell pairs
+        encoding: "bitmap"
+        description: "Bitmap of which cells are actively balancing"
