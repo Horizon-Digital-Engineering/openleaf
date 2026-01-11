@@ -211,7 +211,7 @@ class OpenLeafApp(App):
         # Stop the event loop
         self._loop.call_soon_threadsafe(self._loop.stop)
 
-    def _update_debug_view(self, screen_manager, log: list[Dict[str, Any]]) -> None:
+    def _update_debug_view(self, screen_manager, log: list) -> None:
         if self._last_debug_log is not None and log == self._last_debug_log:
             return
         self._last_debug_log = list(log)
@@ -227,11 +227,15 @@ class OpenLeafApp(App):
         if not log:
             return
         for entry in reversed(log):
-            ts = entry.get("ts", 0.0)
-            direction = str(entry.get("direction", "")).upper()
-            data = entry.get("data", "")
-            ts_str = datetime.fromtimestamp(ts).strftime("%H:%M:%S")
-            line = f"[{ts_str}] {direction}: {data}"
+            # Handle both string entries and dict entries
+            if isinstance(entry, str):
+                line = entry
+            else:
+                ts = entry.get("ts", 0.0)
+                direction = str(entry.get("direction", "")).upper()
+                data = entry.get("data", "")
+                ts_str = datetime.fromtimestamp(ts).strftime("%H:%M:%S")
+                line = f"[{ts_str}] {direction}: {data}"
             button = Button(
                 text=line,
                 size_hint_y=None,

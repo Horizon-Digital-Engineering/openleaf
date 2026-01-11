@@ -132,11 +132,12 @@ broadcast_frames:
     length: 8
     signals:
       - key: "range_km"
-        start_bit: 3
+        start_bit: 8
         length: 12
         scale: 0.2
         unit: "km"
-        description: "Estimated range from instrument cluster"
+        formula: "(data[1] << 4) | (data[2] >> 4)"
+        description: "Estimated range from instrument cluster (OVMS formula)"
       - key: "low_battery_warning"
         start_bit: 16
         length: 1

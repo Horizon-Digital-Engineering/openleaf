@@ -348,6 +348,20 @@ class OBD2Transport(Transport):
         if temps:
             state["pack_temp_c"] = sum(temps) / len(temps)
 
+        # Calculate SOC from GIDs if not available from broadcast
+        # Note: 0x55B (soc_precise) and 0x1DB (soc_display) are on EV-CAN, not accessible via OBD2
+        # Formula: SOC = current_gids / max_gids * 100
+        # Max GIDs for 24kWh pack = 281 (new), adjusted by SOH
+        if state.get("gids") and not state.get("soc_display"):
+            gids = state["gids"]
+            soh = state.get("soh_alt") or state.get("soh") or 100.0
+            # Max GIDs at current SOH (281 for new 24kWh pack)
+            max_gids_new = 281
+            max_gids = max_gids_new * (soh / 100.0)
+            if max_gids > 0:
+                soc = min(100.0, (gids / max_gids) * 100.0)
+                state["soc_display"] = round(soc, 1)
+
     def poll_broadcast_messages(self, duration_sec: float = 1.0) -> Dict[str, Any]:
         """Poll for broadcast CAN messages (SOH, SOC, etc).
 

@@ -469,10 +469,10 @@ def decode_broadcast_frame(data: bytes, frame: BroadcastFrame) -> Dict[str, Any]
         if signal.signed and value >= (1 << (bits_needed - 1)):
             value -= (1 << bits_needed)
 
-        # Apply formula if present (e.g., "value >> 1")
+        # Apply formula if present (e.g., "value >> 1" or "(data[1] << 4) | (data[2] >> 4)")
         if signal.formula:
             try:
-                value = eval(signal.formula)  # Safe since we control the YAML
+                value = eval(signal.formula, {"value": value, "data": data})
             except Exception:
                 pass
 

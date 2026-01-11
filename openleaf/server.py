@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from .config import AppConfig
+from .config import AppConfig, load_config
 from .state import StateStore
 from .transports import OBD2Transport, PlaybackTransport, SyntheticTransport, Transport
 from .logging.setup import get_transport_logger
@@ -144,3 +144,23 @@ class LeafStateServer:
         for update in self.transport.loop():
             if isinstance(update, dict):
                 self.state_store.update(**update)
+
+
+def main() -> None:
+    import argparse
+    import uvicorn
+
+    parser = argparse.ArgumentParser(description="OpenLeaf State Server")
+    parser.add_argument("--config", "-c", required=True, help="Path to YAML config file")
+    parser.add_argument("--host", default="127.0.0.1", help="Host to bind to")
+    parser.add_argument("--port", type=int, default=8000, help="Port to bind to")
+    args = parser.parse_args()
+
+    config = load_config(args.config)
+    server = LeafStateServer(config)
+    server.start_background_loop()
+    uvicorn.run(server.app, host=args.host, port=args.port, log_level="info")
+
+
+if __name__ == "__main__":
+    main()
