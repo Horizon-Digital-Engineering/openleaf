@@ -1,6 +1,6 @@
 # OpenLeaf Implementation Status
 **Last Updated:** 2026-01-10
-**Reference:** [REQUIREMENTS.md](REQUIREMENTS.md)
+**Reference:** [requirements.md](requirements.md)
 
 ---
 

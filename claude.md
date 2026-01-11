@@ -114,9 +114,9 @@ The codebase is structured for reuse with any Leaf generation:
 
 ## Key Documentation
 
-- [docs/IMPLEMENTATION_LOG.md](docs/IMPLEMENTATION_LOG.md) - Debugging journey and solutions
-- [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) - Feature checklist
-- [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) - Full feature spec
+- [docs/implementation_log.md](docs/implementation_log.md) - Debugging journey and solutions
+- [docs/implementation_status.md](docs/implementation_status.md) - Feature checklist
+- [docs/requirements.md](docs/requirements.md) - Full feature spec
 - [docs/ref/](docs/ref/) - DBC files and CAN analysis
 
 ## Next Steps
