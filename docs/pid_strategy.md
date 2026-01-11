@@ -11,12 +11,16 @@
 ### Layer 1: Passive CAN Monitoring
 **Always running in background**
 
-The following CAN IDs broadcast automatically without queries:
-- **0x5BC** (500ms): State of charge percentage
+The following CAN IDs broadcast automatically on **Car-CAN** (accessible via OBD2):
 - **0x5B3** (500ms): Battery health (SOH), GIDs count
-- **0x1DB** (100ms): Pack voltage, charging status
-- **0x55B** (100ms): Vehicle speed, motor RPM
-- **0x5C5** (1000ms): Odometer reading
+- **0x5A9** (100ms): Estimated range
+- **0x5BC** (500ms): Charge bars, pack temperature (sometimes)
+
+**Note**: Some messages are on **EV-CAN** (NOT accessible via OBD2 port):
+- 0x1DB: Pack voltage, current, SOC - requires direct CAN tap
+- 0x55B: Precise SOC - requires direct CAN tap
+
+**Workaround**: SOC is calculated from GIDs: `soc = gids / (281 * soh/100) * 100`
 
 ### Layer 2: Screen-Based Active Queries
 **Only query when screen is visible**
@@ -93,11 +97,15 @@ Three test configurations validate the approach:
 
 Each mode can be tested with different configuration files to isolate and validate each data collection method.
 
-## Next Steps
+## Implementation Status
 
-1. Implement `PassiveCANMonitor` class
-2. Implement `ActivePIDPoller` class
-3. Add `/ui/screen` endpoint to server
-4. Update UI to notify screen changes
-5. Test with real vehicle
-6. Optimize polling intervals based on testing
+### Completed ✅
+- Passive broadcast monitoring (0x5B3, 0x5A9)
+- Active PID queries (Service 0x21 Groups 1-4, 6)
+- YAML-driven signal definitions
+- DTC read/clear from all ECUs
+- Full Kivy UI with Dashboard, Cells, DTCs, Debug screens
+
+### Remaining
+- Screen-based query optimization (currently polls all PIDs)
+- Capture more broadcasts while driving/charging (0x1DA, 0x380)

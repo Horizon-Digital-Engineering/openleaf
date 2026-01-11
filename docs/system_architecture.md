@@ -122,8 +122,11 @@ UI ──POST /request_pids──> Server ──queries──> OBD2 ──update
 - **GET /pids/active** - List currently active PID subscriptions
 - **GET /pids/available** - List all PIDs the system can query
 
+### DTC Endpoints
+- **GET /dtcs** - Read DTCs from all ECUs (returns per-ECU results)
+- **POST /command/clear_dtcs** - Clear DTCs from all ECUs
+
 ### Command Endpoints
-- **POST /command/clear_dtcs** - Clear diagnostic trouble codes
 - **POST /command/reset** - Reset adapter connection
 
 ## Transport Implementation

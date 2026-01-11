@@ -444,3 +444,175 @@ Also added Y-axis voltage labels and X-axis cell numbers (every 12 cells).
 3. **DBC files are the source of truth** - OVMS formulas in DBC comments are reliable
 4. **Always add entry points** - Python modules need `if __name__ == "__main__"` to be runnable
 5. **Handle data format changes** - Debug logs changed from dicts to strings, broke UI
+
+---
+
+## Session: 2026-01-11 - DTC Support
+
+### Goal
+Add diagnostic trouble code (DTC) read and clear functionality.
+
+---
+
+## Feature: YAML-Driven ECU Definitions
+
+**Problem**: ECU addresses vary by Leaf generation. Hardcoding them limits flexibility.
+
+**Solution**: Add `ecus` section to YAML files with per-generation ECU definitions.
+
+**Implementation** in [pids/leaf_aze0.yaml](../pids/leaf_aze0.yaml):
+```yaml
+ecus:
+  - id: 0x79B
+    response_id: 0x7BB
+    name: "LBC"
+    description: "Lithium Battery Controller"
+    supports_dtc: true
+  - id: 0x797
+    response_id: 0x7B7
+    name: "VCM"
+    description: "Vehicle Control Module"
+    supports_dtc: true
+  # ... 8 ECUs total for AZE0
+```
+
+**ZE1 has additional ECUs**:
+- ADAS (0x756) - ProPilot / Advanced Driver Assistance
+- ICM (0x764) - Intelligent Cruise Module (e-Pedal)
+
+---
+
+## Feature: DTC Read from All ECUs
+
+**Implementation** in [openleaf/transports/obd2_unified.py](../openleaf/transports/obd2_unified.py):
+
+```python
+@dataclass
+class EcuDefinition:
+    """ECU definition loaded from YAML."""
+    id: int
+    response_id: int
+    name: str
+    description: str = ""
+    supports_dtc: bool = True
+
+def read_dtcs(self) -> Dict[str, List[str]]:
+    """Read DTCs from all ECUs defined in YAML."""
+    results: Dict[str, List[str]] = {}
+    for ecu in self.ecus:
+        if not ecu.supports_dtc:
+            continue
+        try:
+            dtcs = self.protocol.read_dtcs(ecu_id=ecu.id)
+            results[ecu.name] = dtcs if dtcs else []
+        except Exception as e:
+            results[ecu.name] = ["ERROR"]
+    return results
+```
+
+**Protocol**: UDS Service 0x19 (Read DTC) with sub-function 0x02 (reportDTCByStatusMask)
+
+---
+
+## Feature: DTC Clear from All ECUs
+
+**Implementation**:
+```python
+def clear_dtcs(self) -> Dict[str, bool]:
+    """Clear DTCs from all ECUs defined in YAML."""
+    results = {}
+    for ecu in self.ecus:
+        if not ecu.supports_dtc:
+            continue
+        try:
+            success = self.protocol.clear_dtcs(ecu_id=ecu.id)
+            results[ecu.name] = success
+        except Exception:
+            results[ecu.name] = False
+    return results
+```
+
+**Protocol**: UDS Service 0x14 (Clear DTC) with 0xFFFFFF for all groups
+
+---
+
+## Feature: Per-ECU UI Display
+
+**Problem**: User wanted to see each ECU scanned, not just "No DTCs found".
+
+**Solution**: Update UI to show per-ECU results with color coding.
+
+**Implementation** in [openleaf/ui/kivy/main.py](../openleaf/ui/kivy/main.py):
+```python
+def _update_dtc_view(self, screen_manager, ecu_results: dict[str, list[str]]) -> None:
+    for ecu_name, codes in ecu_results.items():
+        if not codes:
+            # Green - No DTCs
+            background_color = (0.15, 0.35, 0.20, 1)
+            text = f"{ecu_name}: OK"
+        elif codes == ["ERROR"]:
+            # Orange - ECU didn't respond
+            background_color = (0.35, 0.25, 0.15, 1)
+            text = f"{ecu_name}: No Response"
+        else:
+            # Red - Has DTCs
+            background_color = (0.45, 0.18, 0.18, 1)
+            text = f"{ecu_name}:{code}"
+```
+
+**Toast messages**:
+- "Scanning ECUs..." when starting
+- "Scanned 8 ECUs - All OK" when no DTCs
+- "Found 3 DTC(s)" when DTCs present
+
+---
+
+## API Changes
+
+**Endpoint**: `GET /dtcs`
+```json
+{
+  "ecus": {
+    "LBC": [],
+    "VCM": ["P0A1F"],
+    "ABS": [],
+    "EPS": ["ERROR"],
+    ...
+  }
+}
+```
+
+**Endpoint**: `POST /command/clear_dtcs`
+```json
+{
+  "status": "ok",
+  "results": {
+    "LBC": true,
+    "VCM": true,
+    ...
+  }
+}
+```
+
+---
+
+## Files Modified (Session 4)
+
+| File | Changes |
+|------|---------|
+| pids/leaf_aze0.yaml | Added ECU definitions section |
+| pids/leaf_ze0.yaml | Added ECU definitions section |
+| pids/leaf_ze1.yaml | Added ECU definitions (including ADAS, ICM) |
+| openleaf/transports/obd2_unified.py | EcuDefinition dataclass, read_dtcs(), clear_dtcs() |
+| openleaf/server.py | Updated /dtcs endpoint to return per-ECU results |
+| openleaf/ui/kivy/services/api.py | Updated read_dtcs() return type |
+| openleaf/ui/kivy/main.py | Per-ECU DTC display with color coding |
+
+---
+
+## Key Learnings (Session 4)
+
+1. **ECU addresses vary by generation** - ZE1 has ADAS and ICM not present in ZE0/AZE0
+2. **YAML-driven is the way** - ECU definitions in YAML make generation-specific support easy
+3. **Show work, not just results** - Users want to see each ECU scanned, not just "no DTCs"
+4. **Color coding improves UX** - Green/Orange/Red makes scan results instantly readable

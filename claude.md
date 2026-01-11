@@ -1,10 +1,10 @@
 # OpenLeaf Project Context
 
-**Last Updated:** 2026-01-11 (Session 3)
+**Last Updated:** 2026-01-11 (Session 4)
 
-## Current Status: Full UI Working!
+## Current Status: Full UI Working + DTC Support!
 
-The Kivy UI is now displaying live data from the 2013 Leaf via BLE OBD2 adapter. All major battery metrics are working.
+The Kivy UI is now displaying live data from the 2013 Leaf via BLE OBD2 adapter. All major battery metrics are working, plus DTC read/clear functionality.
 
 ### Live Data (2026-01-11)
 
@@ -19,6 +19,13 @@ The Kivy UI is now displaying live data from the 2013 Leaf via BLE OBD2 adapter.
 | Pack Temp | 22.3°C | UDS Group 4 |
 | Range | 60 km / 37 mi | Broadcast 0x5A9 |
 | Balancing | Active | UDS Group 6 |
+
+### Session 4 Features
+
+1. **DTC Read/Clear** - Scan all ECUs for diagnostic trouble codes via UDS Service 0x19/0x14
+2. **YAML-Driven ECU Definitions** - ECU addresses defined in YAML files per generation
+3. **Per-ECU Scan Results** - UI shows each ECU status (OK, No Response, or DTCs)
+4. **Color-Coded DTC Display** - Green=OK, Orange=No Response, Red=Has DTCs
 
 ### Session 3 Fixes
 
@@ -92,9 +99,11 @@ Workaround: Calculate SOC from GIDs: `soc = gids / (281 * soh/100) * 100`
 - All 96 cell voltages with correct scaling
 - Temperature sensors (4 thermistors)
 - YAML-driven signal decoding (no hardcoded offsets)
-- **Full Kivy UI with Dashboard, Cells, Debug screens**
+- **Full Kivy UI with Dashboard, Cells, DTCs, Debug screens**
 - **Cell voltage graph with axis labels**
 - **SOC calculated from GIDs**
+- **DTC read/clear from all ECUs (Service 0x19/0x14)**
+- **Per-ECU scan results with color-coded status**
 
 ## What's Missing
 
@@ -102,6 +111,7 @@ Workaround: Calculate SOC from GIDs: `soc = gids / (281 * soh/100) * 100`
 - **Motor/inverter data** - Only available while driving
 - **Charger data** - Only available while charging
 - **Unit conversion toggle** - km/miles, C/F preferences
+- **Health screen** - Battery degradation trends
 
 ## Code Quality
 
@@ -121,10 +131,11 @@ The codebase is structured for reuse with any Leaf generation:
 
 ## Next Steps
 
-1. **Capture more broadcast messages** - Drive/charge to capture 0x1DA, 0x380, 0x5BC
-2. **Add unit preferences** - km/miles, C/F toggle in settings
-3. **Add logging** - Record trips for analysis
-4. **Test other generations** - Verify ZE0/ZE1 YAML files
+1. **Test DTC functionality** - Verify read/clear works with real car
+2. **Capture more broadcast messages** - Drive/charge to capture 0x1DA, 0x380, 0x5BC
+3. **Add unit preferences** - km/miles, C/F toggle in settings
+4. **Add logging** - Record trips for analysis
+5. **Test other generations** - Verify ZE0/ZE1 YAML files
 
 ## Known Quirks
 

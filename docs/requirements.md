@@ -161,20 +161,20 @@ Create a comprehensive Nissan Leaf battery monitoring dashboard that displays al
 
 ---
 
-### 9. Diagnostic Trouble Codes (DTCs)
+### 9. Diagnostic Trouble Codes (DTCs) ✅ IMPLEMENTED
 **Must Display:**
 - Active DTCs (P-codes)
-- Pending DTCs
-- Historical DTC count
-- Description of each code
+- Per-ECU scan results (OK, No Response, or DTC codes)
+- Color-coded status (Green=OK, Orange=No Response, Red=DTCs)
 
 **Functionality:**
-- Read DTCs via Service 0x19 (Read DTC)
-- Clear DTCs via Service 0x14 (Clear DTC) - with user confirmation
-- Monitor MIL (Malfunction Indicator Lamp) status
+- Read DTCs via Service 0x19 (Read DTC) - ✅ Implemented
+- Clear DTCs via Service 0x14 (Clear DTC) - ✅ Implemented
+- Scan all ECUs defined in YAML per generation
 
 **Data Source:**
-- Standard OBD-II service 0x19
+- UDS Service 0x19 with sub-function 0x02
+- ECU addresses from YAML (generation-specific)
 
 ---
 

@@ -42,13 +42,31 @@ transport:
   serial_baudrate: 115200
 ```
 
-## Benefits of New Architecture
+## YAML Definitions
+
+Each Leaf generation has a YAML file defining:
+- **PIDs** - Active diagnostic queries (Service 0x21)
+- **Broadcast Frames** - Passive CAN messages to monitor
+- **ECUs** - ECU addresses for DTC read/clear
+
+```yaml
+# pids/leaf_aze0.yaml
+ecus:
+  - id: 0x79B
+    response_id: 0x7BB
+    name: "LBC"
+    supports_dtc: true
+  # ... more ECUs
+```
+
+## Benefits of This Architecture
 
 1. **No Code Duplication** - Shared ELM327 protocol handler
 2. **Pluggable Connections** - Easy to add WiFi, CAN, etc.
 3. **Clean Separation** - I/O vs Protocol logic
 4. **Recording/Playback** - Built-in session recording
 5. **Unified Configuration** - One transport, multiple connections
+6. **Generation-Specific** - YAML files per Leaf generation (ZE0, AZE0, ZE1)
 
 ## File Structure
 

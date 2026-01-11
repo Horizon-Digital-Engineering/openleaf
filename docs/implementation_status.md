@@ -1,5 +1,5 @@
 # OpenLeaf Implementation Status
-**Last Updated:** 2026-01-11 (Session 3)
+**Last Updated:** 2026-01-11 (Session 4)
 **Reference:** [requirements.md](requirements.md)
 
 ---
@@ -44,8 +44,9 @@
 | ELM327 Protocol | 🟢 | ISO-TP multi-frame with flow control |
 | Active PID Queries | 🟢 | Groups 1, 2, 3, 4, 6 working |
 | Passive Broadcast | 🟢 | 0x5B3, 0x5A9 captured |
-| FastAPI Server | 🟢 | Port 8000, /state endpoint |
-| Kivy UI | 🟢 | Dashboard, Cells, Debug screens |
+| DTC Read/Clear | 🟢 | Service 0x19/0x14, all ECUs from YAML |
+| FastAPI Server | 🟢 | Port 8000, /state, /dtcs endpoints |
+| Kivy UI | 🟢 | Dashboard, Cells, DTCs, Debug screens |
 
 ---
 
@@ -69,10 +70,9 @@
 | Charger Power | 0x380 | While charging |
 | AC Voltage | 0x380 | While charging |
 
-### Not Implemented
+### Not Yet Implemented
 | Feature | Priority | Notes |
 |---------|----------|-------|
-| DTC Read/Clear | P1 | Service 0x19/0x14 |
 | Power Limits | P2 | 0x1DC frame |
 | Charge History | P2 | Need research |
 | Trip Recording | P2 | JSON logging |
@@ -86,9 +86,9 @@
 |--------|--------|----------|
 | Dashboard | 🟢 | SOC gauge, SOH gauge, GIDs, HX, Range metrics |
 | Cells | 🟢 | 96-cell bar graph with Y-axis voltage labels, X-axis cell numbers |
+| DTCs | 🟢 | Per-ECU scan results, color-coded status, read/clear buttons |
 | Debug | 🟢 | Transport log viewer |
 | Health | 🔴 | Not implemented |
-| DTCs | 🔴 | Not implemented |
 | Settings | 🔴 | Not implemented |
 
 ---
@@ -128,9 +128,11 @@
 - [x] Full Kivy UI with gauges and cell graph
 - [x] SOC calculation from GIDs
 - [x] Tested with real car
+- [x] DTC read/clear (Service 0x19/0x14)
+- [x] Per-ECU DTC scan results with color coding
 
 ### P1 - Next Up
-- [ ] DTC read/clear (Service 0x19/0x14)
+- [ ] Test DTC functionality with real car
 - [ ] Health screen in UI
 - [ ] Settings screen with unit preferences
 - [ ] Capture more broadcasts while driving
@@ -162,4 +164,4 @@
 - [x] Updates dashboard in real-time
 - [x] Tested with actual 2013 Leaf
 
-**Current Progress:** ~75% complete (core features working, polish items remaining)
+**Current Progress:** ~80% complete (core features + DTC working, polish items remaining)
