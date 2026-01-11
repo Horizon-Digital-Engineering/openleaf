@@ -1,32 +1,54 @@
 # OpenLeaf Project Context
 
-**Last Updated:** 2026-01-10 (Session 2)
+**Last Updated:** 2026-01-11 (Session 3)
 
-## Current Status: Working with Real Car!
+## Current Status: Full UI Working!
 
-The BLE OBD2 adapter is now successfully reading data from a 2013 Leaf. After extensive debugging, we achieved **43.6% field coverage** (17/39 fields populated).
+The Kivy UI is now displaying live data from the 2013 Leaf via BLE OBD2 adapter. All major battery metrics are working.
 
-### Latest Test Results (2026-01-10 22:53)
+### Live Data (2026-01-11)
 
 | Metric | Value | Source |
 |--------|-------|--------|
+| SOC | ~70% | Calculated from GIDs |
 | SOH | 44% | Broadcast 0x5B3 |
-| GIDs | 85 (~6.8 kWh) | Broadcast 0x5B3 |
+| GIDs | 86 (~6.9 kWh) | Broadcast 0x5B3 |
 | Battery HX | 60.9% | UDS Group 1 |
-| Cell Voltages | 96 cells (3.976V - 3.994V) | UDS Group 2 |
-| Cell Delta | 18mV | Calculated |
+| Cell Voltages | 96 cells (3.973V - 3.994V) | UDS Group 2 |
+| Cell Delta | 21mV | Calculated |
 | Pack Temp | 22.3°C | UDS Group 4 |
-| Range | 78.6 km | Broadcast 0x5A9 |
+| Range | 60 km / 37 mi | Broadcast 0x5A9 |
 | Balancing | Active | UDS Group 6 |
 
-### Key Fixes This Session
+### Session 3 Fixes
 
-1. **Flow Control** - Added ATFCSH/ATFCSD/ATFCSM1 commands for multi-frame ISO-TP
-2. **Byte Offsets** - Fixed Group 1, 3, 4 offsets based on raw hex analysis
-3. **Broadcast Monitoring** - Added ATCRA filtering to prevent adapter overflow
-4. **YAML-Driven Decoding** - Refactored to eliminate all hardcoded byte positions
+1. **Server Entry Point** - Added `main()` to server.py so `python -m openleaf.server` works
+2. **SOC Calculation** - Calculate from GIDs since 0x55B/0x1DB are on EV-CAN (not accessible via OBD2)
+3. **Range Fix** - Corrected bit extraction using OVMS formula from DBC reference
+4. **Cell Graph** - Added Y-axis voltage labels, X-axis cell numbers, minimum bar height
+5. **Debug Log Fix** - UI now handles string format debug entries
 
-See [docs/IMPLEMENTATION_LOG.md](docs/IMPLEMENTATION_LOG.md) for the full debugging journey.
+### Key Discovery: EV-CAN vs Car-CAN
+
+The OBD2 port only exposes **Car-CAN**. Some messages are on **EV-CAN** and not accessible:
+- 0x1DB (pack voltage/current, soc_display) - **EV-CAN only**
+- 0x55B (soc_precise) - **EV-CAN only**
+
+Workaround: Calculate SOC from GIDs: `soc = gids / (281 * soh/100) * 100`
+
+## Quick Start
+
+```bash
+# Start everything (creates venv, installs deps, runs server + UI)
+./start.sh all
+
+# Or separately:
+./start.sh server  # API at http://localhost:8000/state
+./start.sh ui      # Kivy dashboard
+
+# Stop
+./stop.sh all
+```
 
 ## Project Architecture
 
@@ -38,15 +60,15 @@ See [docs/IMPLEMENTATION_LOG.md](docs/IMPLEMENTATION_LOG.md) for the full debugg
 ### State Management
 - **[openleaf/state.py](openleaf/state.py)** - LeafState dataclass (35+ fields) + StateStore (thread-safe)
 
+### UI Layer
+- **[openleaf/ui/kivy/main.py](openleaf/ui/kivy/main.py)** - Main Kivy app, fetches /state API
+- **[openleaf/ui/kivy/ui.kv](openleaf/ui/kivy/ui.kv)** - UI layout (Dashboard, Cells, Debug screens)
+- **[openleaf/ui/kivy/widgets/](openleaf/ui/kivy/widgets/)** - Custom widgets (Gauge, Metric, CellGraph)
+
 ### YAML Definitions (3 Generations)
 - **[pids/leaf_aze0.yaml](pids/leaf_aze0.yaml)** - 2013-2017 (24/30kWh) - **YOUR CAR**
 - **[pids/leaf_ze0.yaml](pids/leaf_ze0.yaml)** - 2011-2012 (24kWh)
 - **[pids/leaf_ze1.yaml](pids/leaf_ze1.yaml)** - 2018+ (40/62kWh)
-
-Each YAML now has:
-- `metadata` - Generation, years, battery specs
-- `broadcast_frames` - Passive CAN monitoring (SOH, SOC, GIDs, etc.)
-- `query_pids` - Active UDS Service 0x21 queries
 
 ### API Layer
 - **[openleaf/server.py](openleaf/server.py)** - FastAPI server (port 8000)
@@ -58,7 +80,7 @@ Each YAML now has:
 | Generation | AZE0 (2013-2017) |
 | Battery | 24kWh AESC LMO |
 | SOH | 44% |
-| Remaining Capacity | ~85 GIDs = 6.8 kWh |
+| Remaining Capacity | ~86 GIDs = 6.9 kWh |
 | HX (Internal Resistance) | 60.9% |
 
 ## What's Working
@@ -70,29 +92,16 @@ Each YAML now has:
 - All 96 cell voltages with correct scaling
 - Temperature sensors (4 thermistors)
 - YAML-driven signal decoding (no hardcoded offsets)
+- **Full Kivy UI with Dashboard, Cells, Debug screens**
+- **Cell voltage graph with axis labels**
+- **SOC calculated from GIDs**
 
 ## What's Missing
 
-- **pack_voltage, pack_current** - 0x1DB broadcast (not captured yet)
-- **soc_display, soc_precise** - Need 0x5BC/0x55B captures
-- **Motor/inverter data** - Only while driving
-- **Charger data** - Only while charging
-- **UI screens** - Cells, health, DTC displays
-
-## Quick Start
-
-```bash
-# Setup
-python3 -m venv venv
-source venv/bin/activate
-pip install pyyaml bleak pyserial
-
-# Test connection (car must be ON)
-python3 test_connection.py
-
-# Review results
-cat test_results.json | python3 -m json.tool
-```
+- **pack_voltage, pack_current** - On EV-CAN, need gateway or direct CAN tap
+- **Motor/inverter data** - Only available while driving
+- **Charger data** - Only available while charging
+- **Unit conversion toggle** - km/miles, C/F preferences
 
 ## Code Quality
 
@@ -112,8 +121,8 @@ The codebase is structured for reuse with any Leaf generation:
 
 ## Next Steps
 
-1. **Capture more broadcast messages** - Drive/charge to get 0x1DB, 0x1DA, 0x380
-2. **Expand UI** - Add cell voltage display, health screen
+1. **Capture more broadcast messages** - Drive/charge to capture 0x1DA, 0x380, 0x5BC
+2. **Add unit preferences** - km/miles, C/F toggle in settings
 3. **Add logging** - Record trips for analysis
 4. **Test other generations** - Verify ZE0/ZE1 YAML files
 
@@ -122,4 +131,4 @@ The codebase is structured for reuse with any Leaf generation:
 - **Car must be ON** - Broadcast messages only transmit with ignition on
 - **Cheap adapters need CAN filtering** - ATCRA prevents buffer overflow
 - **Temp sensor 3 returns 255** - Not present on all packs (normal)
-- **Group 1 SOH/SOC unreliable** - Use broadcast 0x5B3 instead
+- **SOC from EV-CAN unavailable** - Use calculated SOC from GIDs instead
